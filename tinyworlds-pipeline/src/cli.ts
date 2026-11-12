@@ -16,6 +16,7 @@ import { renderHomeCard } from "./render/home-card.js";
 import { renderAll } from "./render/run.js";
 import { loadScene } from "./render/scene.js";
 import { buildScene } from "./scene/build.js";
+import { DEFAULT_OVERLAP, DEFAULT_WINDOW, restyleImage } from "./restyle.js";
 import { fetchAll } from "./sources/index.js";
 
 const program = new Command();
@@ -142,6 +143,29 @@ program
   .option("--data <dir>", "where the worlds' data folders are (default: the frontend's public/data)")
   .action(async (opts: { out?: string; data?: string }) => {
     await renderHomeCard(opts);
+  });
+
+program
+  .command("restyle")
+  .description(
+    "Redraw a rendered PNG as richer isometric pixel art via an image model (optional; needs an API key)",
+  )
+  .requiredOption("--in <file>", "a rendered preview or a tile PNG")
+  .option("--out <file>", "where to write it (default: <in> with -restyled before the extension)")
+  .option("--window <n>", "tile size in px", String(DEFAULT_WINDOW))
+  .option("--overlap <n>", "feather hem in px", String(DEFAULT_OVERLAP))
+  .option("--prompt <text>", "override the default Shenzhen isometric-pixel prompt")
+  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string }) => {
+    const input = path.resolve(opts.in);
+    const parsed = path.parse(input);
+    const output = path.resolve(opts.out ?? path.join(parsed.dir, `${parsed.name}-restyled${parsed.ext}`));
+    await restyleImage({
+      input,
+      output,
+      window: Math.max(32, Math.round(Number(opts.window))),
+      overlap: Math.max(0, Math.round(Number(opts.overlap))),
+      prompt: opts.prompt,
+    });
   });
 
 program

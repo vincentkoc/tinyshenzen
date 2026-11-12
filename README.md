@@ -6,9 +6,10 @@ palms and the parks, generated from open data.
 
 This project is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT
 Licence, © 2026 Nihey Takizawa): the same pipeline and viewer, with a Shenzhen city
-definition and a Shenzhen style. Nothing is drawn by hand and no image model is involved.
-Building footprints and heights, streets, parks, water and trees go in; a pyramid of
-pixel-art tiles comes out.
+definition and a Shenzhen style. Nothing is drawn by hand. The default pipeline is procedural and needs no image model:
+building footprints and heights, streets, parks, water and trees go in; a pyramid of
+pixel-art tiles comes out. An optional `restyle` command can send those tiles to an image
+model if you provide a key (see below).
 
 ## Cities
 
@@ -30,7 +31,7 @@ they are mapped, or estimated from the number of floors.
 
 ## Setup
 
-Requires Node 22+ and npm. No API keys: Overture is read from a public S3 bucket.
+Requires Node 22+ and npm. The default pipeline needs no API keys: Overture is read from a public S3 bucket. The optional `restyle` command is the exception — it reads a key from the environment if you want it.
 
 ```bash
 # 1. make the map (the small Futian box; a few minutes after the download)
@@ -56,6 +57,7 @@ npm run cli -- --city tinysz scene      # build the scene from already-fetched d
 npm run render -- --city tinysz
 npm run cli -- --city tinysz preview --at 114.0683,22.5455
 npm run cli -- --city tinysz card       # share card into ../tinyworlds-frontend/public/og/
+npm run cli -- restyle --in preview.png # optional image-model restyle (needs a key)
 ```
 
 Generated tiles and raw extracts are not committed (`tinyworlds-pipeline/data/` and
@@ -63,6 +65,42 @@ Generated tiles and raw extracts are not committed (`tinyworlds-pipeline/data/` 
 
 The original tinyworlds city ids (New York, Las Vegas, and the rest) are still in the pipeline
 if you want them; this repository is for Shenzhen.
+
+
+## Optional: restyle with an image model
+
+The map itself is still drawn by the procedural renderer. If you want a richer
+isometric-pixel pass in the style of the maps people share on X (tiny.london,
+Pixel Singapore, isometric.nyc), there is an optional `restyle` command. It cuts
+a rendered PNG into overlapping windows, asks an image model to redraw each one
+while keeping the geometry, and feathers the seams (a short "hem", so
+neighbouring windows meet cleanly).
+
+It is opt-in and reads a key from the environment. It never looks for credentials
+on disk.
+
+```bash
+# recommended: Gemini 2.5 Flash Image — cheap, and in the same family as the
+# "Nano Banana" / Gemini image models used as teachers on those isometric maps
+export GEMINI_API_KEY=...          # from https://aistudio.google.com/apikey
+
+# optional overrides
+# export RESTYLE_MODEL=gemini-3-pro-image-preview   # higher quality, more expensive
+# export RESTYLE_PROVIDER=openai
+# export OPENAI_API_KEY=...
+# export RESTYLE_MODEL=gpt-image-1
+
+npm run cli -- restyle --in preview-civic-center.png --out civic-restyled.png
+# defaults: 1024 px windows, 256 px overlap
+```
+
+Cost, roughly: a 1536×1024 preview is one or two windows (a few cents on Flash
+Image). The Futian test canvas (~23,500×11,175 px, 1024 px windows stepped by
+768) is about 450 calls — around US$15–25 with Flash Image, or US$40–70 with a
+Pro or gpt-image model. The full urban-core render would be several times that.
+
+Training a LoRA on teacher frames (the path used by tiny.london and Pixel
+Singapore) is not included: it needs a GPU and a training set.
 
 ## Layout
 
