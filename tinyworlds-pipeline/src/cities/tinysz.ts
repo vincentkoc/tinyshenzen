@@ -1,8 +1,9 @@
 import path from "node:path";
 import { readAreas } from "../geom/geojson.js";
-import { FLORIDA } from "../scene/styles.js";
+import { SHENZHEN } from "../scene/styles.js";
 import { overture } from "../sources/overture.js";
 import { overtureAreas } from "../sources/overtureAreas.js";
+import { HEIGHT_FIXES, LANDMARKS } from "./tinysz.landmarks.js";
 import { CURATED } from "./tinysz.places.js";
 import type { Areas, City } from "./types.js";
 
@@ -105,8 +106,9 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
 
     // Chinese residential storeys are a little under 3.3 m; where a model's height reads low, the floors decide
     heights: { storey: 3.1, raster: false, floorsFirst: true },
-    style: FLORIDA,
-    landmarks: {},
+    style: SHENZHEN,
+    landmarks: LANDMARKS,
+    heightFixes: HEIGHT_FIXES,
     statues: [],
     roofs: { waterTanks: false },
     trees: { street: { spacing: 13, chance: 0.3 } },

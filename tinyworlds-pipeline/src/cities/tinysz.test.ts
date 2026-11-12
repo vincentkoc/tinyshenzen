@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CITIES, DEFAULT_CITY } from "./index.js";
+import { SHENZHEN } from "../scene/styles.js";
 import { CENTER, FULL_BBOX, TEST_BBOX, tinysz, tinyszFull } from "./tinysz.js";
 
 const inside = (
@@ -29,7 +30,11 @@ describe("tinysz", () => {
     expect(inside(FULL_BBOX, 113.994, 22.5095)).toBe(true);
   });
 
-  it("draws from Overture and uses tropical flora", () => {
+  it("draws from Overture, uses the Shenzhen style and tropical flora", () => {
+    expect(tinysz.style).toBe(SHENZHEN);
+    expect(tinyszFull.style).toBe(SHENZHEN);
+    expect(tinysz.landmarks["ping an finance centre"]?.pattern).toBeDefined();
+    expect(tinysz.heightFixes?.["ping an finance centre"]).toBe(599.1);
     expect(tinysz.flora).toBe("tropical");
     expect(tinyszFull.flora).toBe("tropical");
     expect(tinysz.sources.map((s) => s.name)).toEqual(tinyszFull.sources.map((s) => s.name));

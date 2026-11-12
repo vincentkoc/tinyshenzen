@@ -713,6 +713,81 @@ export const SIERRA: StyleProfile = {
   superTall: 0.3,
 };
 
+/** Shenzhen: glass curtain-wall supertalls, white and pastel mid-rises, dense concrete urban villages, tropical greenery. */
+export const SHENZHEN: StyleProfile = {
+  // chengzhongcun / handshake buildings: concrete, brick, cream and tan, packed tight
+  rowWalls: [
+    R.concrete,
+    R.concrete,
+    R.cream,
+    R.whiteBrick,
+    R.brickRed,
+    R.tan,
+    R.greyStone,
+    R.brickDark,
+    R.salmon,
+  ],
+  midWalls: [
+    R.whiteBrick,
+    R.whiteBrick,
+    R.cream,
+    R.cream,
+    R.mint,
+    R.salmon,
+    R.sidingYellow,
+    R.limestone,
+    R.tan,
+    R.rose,
+    R.greyStone,
+  ],
+  slabWalls: [R.whiteBrick, R.whiteBrick, R.cream, R.mint, R.limestone, R.greyStone, R.salmon, R.tan],
+  houseWalls: [
+    R.concrete,
+    R.cream,
+    R.whiteBrick,
+    R.brickRed,
+    R.tan,
+    R.salmon,
+    R.mint,
+    R.sidingYellow,
+    R.sidingSage,
+    R.greyStone,
+    R.rose,
+  ],
+  houseRoofs: [R.roofTerracotta, R.roofClay, R.roofBrown, R.roofGravel, R.roofWhite, R.roofRed, R.roofSlate],
+  // handshake-building footprints are small but tall; only truly low sheds read as houses
+  houseMaxArea: 220,
+  flatRoofs: [R.roofWhite, R.roofWhite, R.roofGravel, R.roofSilver, R.roofTar],
+  lowRoofs: [R.roofWhite, R.roofWhite, R.roofGravel, R.roofSilver, R.roofClay, R.roofTerracotta],
+  lowPitched: 0.12,
+  towerRoofs: [R.roofWhite, R.roofSilver, R.roofGravel],
+  glass: [
+    R.glassBlue,
+    R.glassBlue,
+    R.glassSilver,
+    R.glassTeal,
+    R.glassGreen,
+    R.glassDark,
+    R.glassBronze,
+    R.glassBlack,
+  ],
+  stoneTowers: [R.whiteBrick, R.cream, R.limestone, R.greyStone, R.tan, R.salmon],
+  industrialWalls: [R.concrete, R.greyStone, R.whiteBrick, R.steel, R.cream, R.tan],
+  industrialRoofs: [R.roofWhite, R.roofSilver, R.roofGravel, R.roofTar],
+  civicWalls: [R.whiteBrick, R.cream, R.limestone, R.greyStone, R.tan, R.mint],
+  sacredWalls: [R.brickRed, R.cream, R.yellowBrick, R.whiteBrick, R.tan, R.ochre],
+  sacredRoofs: [R.roofTerracotta, R.roofClay, R.roofRed, R.roofCopper, R.roofBrown],
+  outbuildingWalls: [R.concrete, R.whiteBrick, R.greyStone, R.cream, R.tan],
+  outbuildingRoofs: [R.roofGravel, R.roofWhite, R.roofSilver, R.roofTar],
+  windows: [R.glassDark, R.glassDark, R.glassBlack, R.glassBlue, R.glassTeal],
+  // 26–62 m: masonry villages and punched mid-rises, then white banded slabs; the rest is glass
+  mid: [0.34, 0.44],
+  // 62–125 m: mostly curtain-wall glass
+  high: [0.78, 0.12],
+  // above 125 m: almost all glass, in the Ping An manner
+  superTall: 0.93,
+};
+
 const ALL_WALLS = [
   R.brickRed,
   R.brickDark,
