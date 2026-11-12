@@ -1,5 +1,6 @@
 import { readScene, type Arr } from "../scene/store.js";
 import type { Geo } from "../projection.js";
+import type { CityLook } from "../cities/types.js";
 import type { Flora } from "./sprites.js";
 
 /** The scene as the renderer sees it: typed arrays over shared memory plus a little metadata. */
@@ -51,6 +52,8 @@ export interface Scene {
   flora: Flora;
   /** A framed world: nothing is drawn outside this rectangle of map px (max edges exclusive). */
   clip?: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Prettier local drawing; unset means the original look. */
+  look?: CityLook;
 }
 
 export interface Poly {
@@ -75,6 +78,7 @@ export function sceneFrom(data: SceneData): Scene {
     fog: Omit<Scene["fog"], "d">;
     flora?: Flora;
     clip?: Scene["clip"];
+    look?: CityLook;
   };
   const poly = (prefix: string): Poly => ({
     ringStart: a[`${prefix}.ringStart`] as Uint32Array,
@@ -127,6 +131,7 @@ export function sceneFrom(data: SceneData): Scene {
     bounds: meta.bounds,
     flora: meta.flora ?? "temperate",
     clip: meta.clip,
+    look: meta.look,
   };
 }
 

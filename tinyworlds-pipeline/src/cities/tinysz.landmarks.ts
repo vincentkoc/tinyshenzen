@@ -15,12 +15,12 @@ const glass = (wall: number, pyramid?: number): LandmarkStyle => ({
  */
 export const LANDMARKS: Record<string, LandmarkStyle> = {
   // 599 m, a tapered silver-blue glass blade
-  "ping an finance centre": glass(R.glassSilver, 0.12),
-  "ping an finance center": glass(R.glassSilver, 0.12),
-  "ping an international finance centre": glass(R.glassSilver, 0.12),
-  "ping an international finance center": glass(R.glassSilver, 0.12),
-  平安金融中心: glass(R.glassSilver, 0.12),
-  平安国际金融中心: glass(R.glassSilver, 0.12),
+  "ping an finance centre": glass(R.glassSilver, 0.16),
+  "ping an finance center": glass(R.glassSilver, 0.16),
+  "ping an international finance centre": glass(R.glassSilver, 0.16),
+  "ping an international finance center": glass(R.glassSilver, 0.16),
+  平安金融中心: glass(R.glassSilver, 0.16),
+  平安国际金融中心: glass(R.glassSilver, 0.16),
   // 442 m, a very slender tapering blue tower
   kk100: glass(R.glassBlue, 0.18),
   "kingkey 100": glass(R.glassBlue, 0.18),

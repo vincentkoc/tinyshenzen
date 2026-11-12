@@ -111,7 +111,8 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
     heightFixes: HEIGHT_FIXES,
     statues: [],
     roofs: { waterTanks: false },
-    trees: { street: { spacing: 13, chance: 0.3 } },
+    look: { skyGlass: true, canyonAO: true, roofFurniture: true, palms: true },
+    trees: { street: { spacing: 12, chance: 0.36 } },
     flora: "tropical",
     ground: {},
 

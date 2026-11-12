@@ -987,6 +987,8 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
       roofShape: Roof.Flat,
       roofH: 0,
     };
+    const du = (rand(seed, 42) - 0.5) * side * 0.4;
+    const dv = (rand(seed, 43) - 0.5) * side * 0.3;
     if (h > 62 && area > 420) {
       box(
         0,
@@ -997,11 +999,19 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
         { ...plain, wall: style.pattern === Pattern.Curtain ? R.steel : style.wall },
         41,
       );
-      return;
+      if (!CITY.look?.roofFurniture) return;
+    } else {
+      box(du, dv, 2.3, 1.7, h + 2.9, plain, 44);
     }
-    const du = (rand(seed, 42) - 0.5) * side * 0.4;
-    const dv = (rand(seed, 43) - 0.5) * side * 0.3;
-    box(du, dv, 2.3, 1.7, h + 2.9, plain, 44);
+    if (CITY.look?.roofFurniture && h >= 12 && area >= 160) {
+      const steel = { ...plain, wall: R.steel, roof: R.roofSilver };
+      const nBoxes = h > 80 ? 3 : h > 30 ? 2 : 1;
+      for (let i = 0; i < nBoxes; i++) {
+        const du2 = (rand(seed, 50 + i) - 0.5) * side * 0.5;
+        const dv2 = (rand(seed, 60 + i) - 0.5) * side * 0.4;
+        box(du2, dv2, 1.5, 1.15, h + 1.6 + (i % 2) * 0.6, steel, 70 + i);
+      }
+    }
     if (CITY.roofs.waterTanks && h >= 15 && rand(seed, 45) < 0.3) {
       // the tank stands on legs, clear of the roof, under a shallow cone
       const tp = cp + up * (du > 0 ? -3.6 : 3.6) - uq * dv * -0.8;
@@ -1869,6 +1879,7 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
       geo: GEO,
       bounds,
       flora: CITY.flora,
+      look: CITY.look,
       fog: {
         p0: fog.p0,
         q0: fog.q0,

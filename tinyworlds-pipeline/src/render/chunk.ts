@@ -417,7 +417,7 @@ export class ChunkRenderer {
     }
     // trees cast a little shadow too
     for (let n = 0; n < scatter.length; n += 4) {
-      const r = treeSprite(scatter[n + 3], scatter[n + 2]).r;
+      const r = treeSprite(scatter[n + 3], scatter[n + 2], this.usePalms()).r;
       const tall = r * 14;
       fillEllipse(scatter[n] - gx0 + 0.5, scatter[n + 1] - gy0 + 0.5, r * 0.8, r * 0.4, GW, GH, (y, a, b) => {
         const row = y * GW;
@@ -600,8 +600,15 @@ export class ChunkRenderer {
                       else {
                         const fi = (vv / F) | 0;
                         const pane = mix(seed ^ (bi * 131), fi) & 15;
+                        const streak = (bi + fi * 2 + (seed & 63)) % 19;
                         // a diagonal streak of sky, a few bright panes, a few dark ones
-                        if ((bi + fi * 2 + (seed & 63)) % 19 < 4 || pane === 0) colour = wallHi;
+                        if (this.scene.look?.skyGlass) {
+                          const rise = vv / (wallH || 1);
+                          if (pane === 1 || (rise < 0.22 && pane < 5)) colour = wallLo;
+                          else if (streak < 4 + rise * 10 || pane === 0 || (rise > 0.68 && pane < 7))
+                            colour = wallHi;
+                          else if (rise > 0.48) colour = idx(wallRamp, Math.min(S_HIGH, tone + 1));
+                        } else if (streak < 4 || pane === 0) colour = wallHi;
                         else if (pane === 1) colour = wallLo;
                       }
                       break;
@@ -792,7 +799,7 @@ export class ChunkRenderer {
         const d = this.fogDistance(x, y);
         if (d > fog.start && d >= fog.start + ((seed & 1023) / 1024) * (fog.end - fog.start) * 0.6) continue;
       }
-      const sprite = treeSprite(scatter[n + 3], seed);
+      const sprite = treeSprite(scatter[n + 3], seed, this.usePalms());
       const ramp = treeRamp(seed >>> 5, this.scene.flora);
       const left = x - sprite.anchorX - sx0;
       const top = y - sprite.h + 1 - sy0;
@@ -817,6 +824,11 @@ export class ChunkRenderer {
         }
       }
     }
+  }
+
+  private usePalms(): boolean {
+    const look = this.scene.look;
+    return !!(look?.palms && (this.scene.flora === "tropical" || this.scene.flora === "subtropical"));
   }
 
   // ---- 4. finish ------------------------------------------------------------------------------
@@ -865,6 +877,25 @@ export class ChunkRenderer {
           }
           c = groundColor(ctx, gk[gi], mx, my, gi);
           if (gh[gi] > 6) c = SHADOWED[c];
+          else if (this.scene.look?.canyonAO) {
+            const sx = mx - sx0;
+            const sy = my - sy0;
+            let tall = 0;
+            const probe = (dx: number, dy: number): void => {
+              const px = sx + dx;
+              const py = sy + dy;
+              if (px < 0 || py < 0 || px >= SW || py >= this.SH) return;
+              const n = py * SW + px;
+              if (obj[n] > 0 && hb[n] > 12) tall++;
+            };
+            probe(-1, 0);
+            probe(-2, 0);
+            probe(0, -1);
+            probe(-1, -1);
+            probe(0, -2);
+            if (tall >= 3) c = SHADOWED[c];
+            else if (tall >= 1) c = DARKER[c];
+          }
         } else if (who === -2) {
           c = col[i];
         } else if (who < 0) {
@@ -895,6 +926,13 @@ export class ChunkRenderer {
           )
             c = DARKER[c];
           else if (f === F_ROOF && ((obj[lf] !== who && hb[lf] === H) || (obj[up] !== who && hb[up] === H)))
+            c = DARKER[c];
+          if (
+            this.scene.look?.canyonAO &&
+            (f === F_WALL_LIT || f === F_WALL_HALF || f === F_WALL_SHADE) &&
+            my - sy0 + 2 < this.SH &&
+            (obj[below] === 0 || (obj[below] === who && obj[below + SW] === 0))
+          )
             c = DARKER[c];
         }
         out[o] = c;

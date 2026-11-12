@@ -117,6 +117,9 @@ const RAMP_DEFS = {
   redStone: "#c2725b",
   weirwood: "#ebe6dc",
   pine: "#3c6a4e",
+  // ---- Shenzhen glass (ids last, so existing ramps keep their numbers)
+  glassCyan: "#2eb8cc",
+  glassSky: "#8ed0e6",
 } as const;
 
 export type RampName = keyof typeof RAMP_DEFS;

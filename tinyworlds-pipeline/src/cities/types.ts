@@ -85,6 +85,21 @@ export interface Flight {
 }
 
 /** Everything that makes the pipeline draw one city rather than another. */
+/**
+ * Optional drawing extras. Each flag is a no-op when unset, so a city without `look`
+ * renders exactly as it did.
+ */
+export interface CityLook {
+  /** Curtain-wall glass grades from deep at the street to sky-bright at the crown. */
+  skyGlass?: boolean;
+  /** Ground at the foot of tall walls darkens (street-canyon ambient occlusion). */
+  canyonAO?: boolean;
+  /** Extra mechanical boxes on mid-rise and tall flat roofs. */
+  roofFurniture?: boolean;
+  /** Some trees are drawn as palms (with tropical or subtropical flora). */
+  palms?: boolean;
+}
+
 export interface City {
   /** Also the manifest name, the data folder and the URL path: "tinynyc". */
   id: string;
@@ -192,6 +207,11 @@ export interface City {
      */
     areaByDistrict?: boolean;
   };
+  /**
+   * Extra drawing for a prettier, more local look. Off by default so other cities stay
+   * pixel-identical.
+   */
+  look?: CityLook;
   /** What stands on a flat roof besides the stair bulkhead. */
   roofs: { waterTanks: boolean };
   trees: {
