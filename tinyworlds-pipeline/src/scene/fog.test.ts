@@ -37,9 +37,11 @@ describe("fogAt", () => {
 });
 
 describe("buildFogBuiltUp", () => {
-  // a town 12 km across, built up everywhere but a park 5 km across in its middle
+  // a town built up everywhere but a park in its middle, sized from this city's fog distances
   const proj = makeProjection(makeGeo(0, 0, 0, 2));
   const KM = 1 / 111.195;
+  const holeKm = (FOG.start * 0.15 + FOG.end * 0.85) / 1000;
+  const townKm = holeKm + 3.5;
   const square = (half: number): Polygons => [
     [
       [
@@ -51,13 +53,14 @@ describe("buildFogBuiltUp", () => {
       ],
     ],
   ];
-  const town = square(6 * KM);
-  const park = square(2.5 * KM);
+  const town = square(townKm * KM);
+  const park = square(holeKm * KM);
   const footprints: Footprint[] = [];
-  for (let x = -5.9; x <= 5.9; x += 0.05)
-    for (let y = -5.9; y <= 5.9; y += 0.05)
-      if (Math.abs(x) > 2.5 || Math.abs(y) > 2.5) footprints.push({ lon: x * KM, lat: y * KM, area: 400 });
-  const middle = (fog: FogGrid): number => fogAt(fog, ...proj.toGrid(0, 0.4 * KM));
+  for (let x = -(townKm - 0.1); x <= townKm - 0.1; x += 0.05)
+    for (let y = -(townKm - 0.1); y <= townKm - 0.1; y += 0.05)
+      if (Math.abs(x) > holeKm || Math.abs(y) > holeKm)
+        footprints.push({ lon: x * KM, lat: y * KM, area: 400 });
+  const middle = (fog: FogGrid): number => fogAt(fog, ...proj.toGrid(0, 0));
 
   it("leaves a hole where a park is too big to have buildings near its middle", () => {
     expect(middle(buildFogBuiltUp(town, footprints, proj))).toBeGreaterThan(FOG.start);
