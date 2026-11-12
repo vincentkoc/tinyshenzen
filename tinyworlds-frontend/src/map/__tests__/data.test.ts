@@ -22,7 +22,7 @@ describe("loading the sights", () => {
     const fetchMock = answer(200, {});
     vi.stubGlobal("fetch", fetchMock);
     await loadSightTexts("b7", "es-ES");
-    expect(fetchMock.mock.calls[0][0]).toBe("/data/tinynyc/sights.es-ES.json?v=b7");
+    expect(fetchMock.mock.calls[0][0]).toBe("/data/tinysz/sights.es-ES.json?v=b7");
   });
 });
 
@@ -56,7 +56,7 @@ describe("dataUrl", () => {
   });
 
   it("uses the active world's folder by default", () => {
-    expect(dataUrl("manifest.json")).toBe("/data/tinynyc/manifest.json");
+    expect(dataUrl("manifest.json")).toBe("/data/tinysz/manifest.json");
   });
 });
 
