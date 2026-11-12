@@ -13,6 +13,7 @@ import { tinyrao } from "./tinyrao";
 import { tinytkf } from "./tinytkf";
 import { tinyvlc } from "./tinyvlc";
 import { tinywesteros } from "./tinywesteros";
+import { tinysz } from "./tinysz";
 import { tinywinterfell } from "./tinywinterfell";
 import type { World } from "./types";
 
@@ -23,6 +24,7 @@ export type { World, WorldCopy } from "./types";
  * adding it here (and building it): the front page, the build check and the tests follow.
  */
 export const WORLDS: Record<string, World> = {
+  tinysz,
   tinynyc,
   tinyrao,
   tinyorl,
@@ -40,7 +42,7 @@ export const WORLDS: Record<string, World> = {
   tinykingslanding,
   tinywesteros,
 };
-export const DEFAULT_WORLD = "tinynyc";
+export const DEFAULT_WORLD = "tinysz";
 
 /** Not a world: the build of the front page that lists them. */
 export const HOME = "home";

@@ -21,8 +21,8 @@ import {
 
 describe("site", () => {
   it("is the default world unless the build says otherwise", () => {
-    expect(SITE_ID).toBe("tinynyc");
-    expect(SITE_NAME).toBe("tinynyc");
+    expect(SITE_ID).toBe("tinysz");
+    expect(SITE_NAME).toBe("tinysz");
     expect(HOME_URL).toBe("/");
   });
 
@@ -40,12 +40,16 @@ describe("site", () => {
   it("keeps the moving pictures in the front page's own folder", () => {
     expect(worldLoopUrl("tinyrao")).toBe("/loops/tinyrao.mp4");
     expect(worldLoopUrl("tinyrao", "/sub/loops")).toBe("/sub/loops/tinyrao.mp4");
-    expect(HERO).toEqual({ world: "tinynyc", loop: "/loops/hero.mp4", still: "/loops/hero.jpg" });
+    expect(HERO).toEqual({ world: "tinysz", loop: "/loops/hero.mp4", still: "/loops/hero.jpg" });
     expect(HOME_CARD_PATH).toBe("/og/tinyworlds.jpg");
   });
 
-  it("finds each world's hero film, New York's under its old name", () => {
-    expect(worldHero("tinynyc")).toEqual({ loop: "/loops/hero.mp4", still: "/loops/hero.jpg" });
+  it("finds each world's hero film, the default world's under the short name", () => {
+    expect(worldHero("tinysz")).toEqual({ loop: "/loops/hero.mp4", still: "/loops/hero.jpg" });
+    expect(worldHero("tinynyc")).toEqual({
+      loop: "/loops/hero-tinynyc.mp4",
+      still: "/loops/hero-tinynyc.jpg",
+    });
     expect(worldHero("tinylax")).toEqual({
       loop: "/loops/hero-tinylax.mp4",
       still: "/loops/hero-tinylax.jpg",
@@ -58,8 +62,8 @@ describe("site", () => {
       "tinynyc",
       "tinylax",
     ]);
-    expect(heroSlides(["tinynyc", "tinyrao"], [])).toEqual(["tinynyc"]);
-    expect(heroSlides(["tinynyc", "tinyrao"], ["tinyelsewhere"])).toEqual(["tinynyc"]);
+    expect(heroSlides(["tinynyc", "tinyrao"], [])).toEqual(["tinysz"]);
+    expect(heroSlides(["tinynyc", "tinyrao"], ["tinyelsewhere"])).toEqual(["tinysz"]);
   });
 
   it("knows of no film until the build lists them", () => {
@@ -78,6 +82,7 @@ describe("site", () => {
 
   it("knows which places are already worlds, under every name a donor might type", () => {
     expect(BUILT_CITIES).toEqual([
+      "Shenzhen",
       "New York",
       "Nova York",
       "Nueva York",

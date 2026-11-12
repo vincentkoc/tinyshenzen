@@ -13,12 +13,15 @@ import { tinyrao } from "./tinyrao.js";
 import { tinytkf } from "./tinytkf.js";
 import { tinyvlc } from "./tinyvlc.js";
 import { tinywesteros } from "./tinywesteros.js";
+import { tinysz, tinyszFull } from "./tinysz.js";
 import { tinywinterfell } from "./tinywinterfell.js";
 import type { City } from "./types.js";
 
 export type { City } from "./types.js";
 
 export const CITIES: Record<string, City> = {
+  tinysz,
+  "tinysz-full": tinyszFull,
   tinynyc,
   tinyrao,
   tinyorl,
@@ -36,4 +39,4 @@ export const CITIES: Record<string, City> = {
   tinykingslanding,
   tinywesteros,
 };
-export const DEFAULT_CITY = "tinynyc";
+export const DEFAULT_CITY = "tinysz";

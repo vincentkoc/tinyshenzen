@@ -3,14 +3,16 @@ import { DICTIONARIES, LOCALES } from "@/i18n";
 import { DEFAULT_WORLD, HOME, IS_HOME, resolveWorld, WORLD, WORLDS } from "..";
 
 describe("resolveWorld", () => {
-  it("defaults to tinynyc", () => {
-    expect(DEFAULT_WORLD).toBe("tinynyc");
-    expect(resolveWorld(undefined).id).toBe("tinynyc");
-    expect(resolveWorld("  ").id).toBe("tinynyc");
-    expect(WORLD.id).toBe("tinynyc");
+  it("defaults to tinysz", () => {
+    expect(DEFAULT_WORLD).toBe("tinysz");
+    expect(resolveWorld(undefined).id).toBe("tinysz");
+    expect(resolveWorld("  ").id).toBe("tinysz");
+    expect(WORLD.id).toBe("tinysz");
   });
 
   it("picks a world by id", () => {
+    expect(resolveWorld("tinysz").id).toBe("tinysz");
+    expect(resolveWorld("tinysz").homeLocale).toBe("en-US");
     expect(resolveWorld("tinyrao").id).toBe("tinyrao");
     expect(resolveWorld("tinyrao").homeLocale).toBe("pt-BR");
     expect(resolveWorld("tinynyc").homeLocale).toBe("en-US");
@@ -39,6 +41,7 @@ describe("resolveWorld", () => {
 
   it("lists the worlds in the order the front page shows them", () => {
     expect(Object.keys(WORLDS)).toEqual([
+      "tinysz",
       "tinynyc",
       "tinyrao",
       "tinyorl",
@@ -59,7 +62,7 @@ describe("resolveWorld", () => {
   });
 
   it("stops on an id it does not know, naming the ones it does", () => {
-    expect(() => resolveWorld("tinysp")).toThrow(/tinysp.*tinynyc, tinyrao.*home/);
+    expect(() => resolveWorld("tinysp")).toThrow(/tinysp.*tinysz, tinynyc.*home/);
   });
 
   it("keeps the front page apart: it is a build target, not a world", () => {
