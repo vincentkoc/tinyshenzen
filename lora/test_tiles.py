@@ -908,5 +908,61 @@ class SmoothEdgePolishTest(unittest.TestCase):
 
 
 
+class OverviewFromZ0Test(unittest.TestCase):
+    """write_overview_from_z0 must not leave a pad-coloured grid."""
+
+    PAD = SF.VIEW_FOG
+    CITY = (50, 120, 90)
+
+    def _write_grid(self, root: Path, cols: int, rows: int, colour=None):
+        colour = colour or self.CITY
+        dest = root / "tiles"
+        (dest / "0").mkdir(parents=True)
+        for ty in range(rows):
+            for tx in range(cols):
+                Image.new("RGB", (512, 512), colour).save(
+                    dest / "0" / f"{tx}_{ty}.webp", "WEBP"
+                )
+        return dest
+
+    def test_abutting_tiles_leave_no_pad_grid(self):
+        # 8×4 tiles, max_width=100 → TILE*scale = 12.5, the case that
+        # used to open a 1-px beige gap on every other column.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dest = self._write_grid(root, 8, 4)
+            info = SF.write_overview_from_z0(
+                dest, {"cols": 8, "rows": 4}, root, max_width=100, pad_rgb=self.PAD,
+            )
+            self.assertEqual(info["width"], 100)
+            ov = np.asarray(Image.open(root / "overview.webp").convert("RGB"))
+            self.assertEqual(ov.shape[1], 100)
+            fog = np.all(np.abs(ov.astype(int) - self.PAD) <= 2, axis=2)
+            # the whole canvas is covered by tiles, so no pad should remain
+            self.assertEqual(int(fog.sum()), 0, f"pad pixels={int(fog.sum())}")
+            # city colour is present (not blown out to beige)
+            self.assertGreater(int(ov[:, :, 1].mean()), 80)
+
+    def test_tinysz_core_scale_has_no_column_gaps(self):
+        # same rounding as the real core overview: 168 cols, width 2048
+        # (TILE*scale ≈ 12.190). Use a short 168×2 strip.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dest = self._write_grid(root, 168, 2)
+            info = SF.write_overview_from_z0(
+                dest, {"cols": 168, "rows": 2}, root, max_width=2048, pad_rgb=self.PAD,
+            )
+            self.assertEqual(info["width"], 2048)
+            ov = np.asarray(Image.open(root / "overview.webp").convert("RGB"))
+            fog = np.all(np.abs(ov.astype(int) - self.PAD) <= 2, axis=2)
+            self.assertEqual(int(fog.sum()), 0, f"pad pixels={int(fog.sum())}")
+            # no 1-px bright columns of a different colour
+            col_mean = ov.astype(np.float32).mean(axis=(0, 2))
+            jumps = np.abs(np.diff(col_mean))
+            self.assertLess(float(jumps.max()), 8.0, jumps.max())
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
