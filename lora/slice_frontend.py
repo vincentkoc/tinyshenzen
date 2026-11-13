@@ -1698,13 +1698,18 @@ def polish_smooth_edge(
 
 
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
-    """Build overview.webp from z0 tiles, without a full-resolution canvas."""
+    """Build overview.webp from z0 tiles, without a full-resolution canvas.
+
+    Each tile is resized to the rounded span between this cell and the
+    next so neighbours abut. A single shared width plus a truncated
+    paste position left one-pixel gaps of pad (a visible grid on the
+    minimap) whenever `TILE * scale` was not an integer.
+    """
     cols, rows = grid["cols"], grid["rows"]
     full_w, full_h = cols * TILE, rows * TILE
     pw = min(max_width, full_w)
     scale = pw / full_w
     ph = max(1, round(full_h * scale))
-    tw = max(1, round(TILE * scale))
     prev = Image.new("RGB", (pw, ph), pad_rgb)
     z0 = dest / "0"
     if z0.exists():
@@ -1717,9 +1722,16 @@ def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int
                 tx, ty = int(sx), int(sy)
             except ValueError:
                 continue
+            x0 = int(round(tx * TILE * scale))
+            y0 = int(round(ty * TILE * scale))
+            x1 = min(pw, int(round((tx + 1) * TILE * scale)))
+            y1 = min(ph, int(round((ty + 1) * TILE * scale)))
+            tw, th = x1 - x0, y1 - y0
+            if tw < 1 or th < 1 or x0 >= pw or y0 >= ph:
+                continue
             with Image.open(path) as im:
-                small = im.convert("RGB").resize((tw, max(1, round(im.height * scale))), Image.Resampling.LANCZOS)
-            prev.paste(small, (int(tx * TILE * scale), int(ty * TILE * scale)))
+                small = im.convert("RGB").resize((tw, th), Image.Resampling.LANCZOS)
+            prev.paste(small, (x0, y0))
     path = out_dir / "overview.webp"
     prev.save(path, "WEBP", quality=86, method=2)
     return {"src": "overview.webp", "width": pw, "height": ph}
