@@ -344,6 +344,8 @@ def main() -> None:
             if not rest_path.exists():
                 print(f"  skip missing restyle {t.x},{t.y}", flush=True)
                 continue
+            if out_path.exists() and out_path.stat().st_size > 1000:
+                continue
             if not proc_path.exists():
                 restyle_map.extract_window(args.chunks, meta, t).save(proc_path)
             mask = load_mask(args.mask, width, height, t.x, t.y, t.w, t.h)
