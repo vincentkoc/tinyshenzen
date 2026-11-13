@@ -11,7 +11,13 @@ windows, without assembling a multi-gigabyte canvas. Each district is
 reprojected from its own meta.geo origin into the world's geo (Nanshan is
 centred on Houhai, Luohu on Caiwuwei, the core on Civic Center).
 `--tilewise` also slices the procedural layer from 2048-px chunks the same
-way. Generated images are not committed.
+way. `--polish` is a free, no-API pass over already-sliced z0 tiles: it
+replaces the renderer's dark edge fog with feathered viewer fog so the
+zoomed-out map has no stair-stepped dark border, and fills blocky or
+missing bay-water from the land/water mask with a tone-matched sample
+(procedural water, shifted to the restyle teal). Higher zoom levels are
+then rebuilt with viewer-fog padding so missing children do not become
+dark squares. Generated images are not committed.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFilter
 
 Image.MAX_IMAGE_PIXELS = None
 
@@ -562,7 +568,15 @@ def _pyramid_from_z0(
     present: dict[int, set[tuple[int, int]]],
     pad_rgb: tuple[int, int, int],
 ) -> list[dict]:
+    """Build z1+ from z0. Missing children are filled with `pad_rgb`.
+
+    Use the viewer's fog as `pad_rgb` for a restyle pyramid so a missing
+    neighbour does not become a dark stair-step at low zoom. Children not
+    in `present` are ignored even if a leftover file is on disk. Each
+    level is cleaned of stale tiles from a previous larger present set.
+    """
     cols, rows = grid["cols"], grid["rows"]
+    cleanup_level_tiles(dest, 0, present[0], cols, rows)
     levels = [{"z": 0, "cols": cols, "rows": rows, "tiles": pack_bits(present[0], cols, rows)}]
     z = 1
     z_cols, z_rows = cols, rows
@@ -570,6 +584,7 @@ def _pyramid_from_z0(
         z_cols = (z_cols + 1) // 2
         z_rows = (z_rows + 1) // 2
         present[z] = set()
+        prev = present.get(z - 1, set())
         for ty in range(z_rows):
             for tx in range(z_cols):
                 big = Image.new("RGB", (TILE * 2, TILE * 2), pad_rgb)
@@ -577,6 +592,8 @@ def _pyramid_from_z0(
                 for dy in range(2):
                     for dx in range(2):
                         cx, cy = tx * 2 + dx, ty * 2 + dy
+                        if (cx, cy) not in prev:
+                            continue
                         child = dest / str(z - 1) / f"{cx}_{cy}.webp"
                         if not child.exists():
                             continue
@@ -586,10 +603,14 @@ def _pyramid_from_z0(
                 if not any_child:
                     continue
                 small = big.resize((TILE, TILE), Image.Resampling.LANCZOS)
+                if _almost_empty(np.asarray(small), pad_rgb):
+                    continue
                 _save_webp(small, dest / str(z) / f"{tx}_{ty}.webp", lossless=False)
                 present[z].add((tx, ty))
+        removed = cleanup_level_tiles(dest, z, present[z], z_cols, z_rows)
         levels.append({"z": z, "cols": z_cols, "rows": z_rows, "tiles": pack_bits(present[z], z_cols, z_rows)})
-        print(f"  z{z} {z_cols}×{z_rows}, {len(present[z])} tiles", flush=True)
+        extra = f", removed {removed} stale" if removed else ""
+        print(f"  z{z} {z_cols}×{z_rows}, {len(present[z])} tiles{extra}", flush=True)
         z += 1
     return levels
 
@@ -668,6 +689,493 @@ def fill_gaps_from_procedural(
     return present
 
 
+def present_from_disk(dest: Path, cols: int, rows: int) -> set[tuple[int, int]]:
+    """z0 tile coordinates already on disk and inside the grid."""
+    present: set[tuple[int, int]] = set()
+    z0 = dest / "0"
+    if not z0.exists():
+        return present
+    for path in z0.glob("*.webp"):
+        stem = path.stem
+        if "_" not in stem:
+            continue
+        sx, sy = stem.split("_", 1)
+        try:
+            tx, ty = int(sx), int(sy)
+        except ValueError:
+            continue
+        if 0 <= tx < cols and 0 <= ty < rows:
+            present.add((tx, ty))
+    return present
+
+
+def cleanup_level_tiles(dest: Path, z: int, present: set[tuple[int, int]], cols: int, rows: int) -> int:
+    """Remove leftover tiles at one zoom level that are not in `present`."""
+    folder = dest / str(z)
+    if not folder.exists():
+        return 0
+    removed = 0
+    for path in list(folder.glob("*.webp")):
+        stem = path.stem
+        if "_" not in stem:
+            path.unlink(missing_ok=True)
+            removed += 1
+            continue
+        sx, sy = stem.split("_", 1)
+        try:
+            tx, ty = int(sx), int(sy)
+        except ValueError:
+            path.unlink(missing_ok=True)
+            removed += 1
+            continue
+        if (tx, ty) not in present or tx < 0 or ty < 0 or tx >= cols or ty >= rows:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+# Pixel-Singapore restyle water (`sgWater` in the pipeline). Used as the
+# default tone when a tile has no local good-water sample.
+RESTYLE_WATER = (0x2F, 0x6D, 0x58)
+EDGE_FEATHER = 48
+
+
+def dark_fog_mask(arr: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """True on the renderer's unpainted dark fog, not on water, trees or city.
+
+    Fog is near the renderer pad, near-black, or dark and nearly neutral.
+    Chromatic teal or green (bay water, parks) is kept, even when it's dark.
+    """
+    rgb = arr[:, :, :3] if arr.ndim == 3 and arr.shape[2] == 4 else arr
+    lum = rgb.astype(np.float32).mean(axis=2)
+    chroma = rgb.max(axis=2).astype(np.int16) - rgb.min(axis=2).astype(np.int16)
+    pad = np.array(pad_rgb, dtype=np.int16)
+    near_pad = np.all(np.abs(rgb.astype(np.int16) - pad) <= 10, axis=2)
+    near_black = lum < 8.0
+    neutral_dark = (lum < FOG_LUM_MAX) & (chroma <= 16)
+    fog = near_pad | near_black | neutral_dark
+    g = rgb[:, :, 1].astype(np.int16)
+    r = rgb[:, :, 0].astype(np.int16)
+    b = rgb[:, :, 2].astype(np.int16)
+    chromatic_green = (g > r + 10) & (g > 28) & (g >= b - 20)
+    return fog & ~chromatic_green
+
+
+def smooth_edge_fog(
+    arr: np.ndarray,
+    pad_rgb: tuple[int, int, int],
+    feather: int = EDGE_FEATHER,
+) -> tuple[np.ndarray | None, str]:
+    """Replace dark edge fog with viewer fog, feathered at the city boundary.
+
+    Returns `(image, status)` where status is `'unchanged'`, `'changed'`, or
+    `'empty'` (the tile is only fog and should be deleted). The whole dark
+    band becomes solid beige; only the last `feather` pixels at the city
+    edge are a blend, so a thick stair-stepped border disappears rather
+    than turning into a soft dark smear.
+    """
+    rgb = arr[:, :, :3] if arr.ndim == 3 and arr.shape[2] == 4 else np.asarray(arr)
+    fog = dark_fog_mask(rgb, pad_rgb)
+    view = np.all(
+        np.abs(rgb.astype(np.int16) - np.array(VIEW_FOG, dtype=np.int16)) <= VIEW_FOG_TOL,
+        axis=2,
+    )
+    empty = fog | view
+    if not fog.any():
+        return rgb.copy(), "unchanged"
+    if float(empty.mean()) > 0.995:
+        return None, "empty"
+    if feather > 0:
+        blur = Image.fromarray(fog.astype(np.uint8) * 255, "L").filter(
+            ImageFilter.GaussianBlur(radius=max(1.0, feather / 2.5))
+        )
+        alpha = np.asarray(blur, dtype=np.float32) / 255.0
+    else:
+        alpha = fog.astype(np.float32)
+    out = rgb.astype(np.float32)
+    vf = np.array(VIEW_FOG, dtype=np.float32)
+    out = out * (1.0 - alpha[:, :, None]) + vf * alpha[:, :, None]
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    if _almost_empty(out, pad_rgb):
+        return None, "empty"
+    return out, "changed"
+
+
+def attach_water_masks(districts: list[dict]) -> int:
+    """Attach memmap descriptors for each district's `water_mask.raw`, if present.
+
+    The mask origin is in the district's local coordinates; `d['origin']` is
+    already the reprojected world origin of that local origin.
+    """
+    attached = 0
+    for d in districts:
+        chunks = Path(d["chunks"])
+        jpath = chunks / "water_mask.json"
+        raw = chunks / "water_mask.raw"
+        if not jpath.exists() or not raw.exists():
+            d.pop("water_mask", None)
+            continue
+        meta = json.loads(jpath.read_text())
+        loc = d.get("meta") or {}
+        loc_o = loc.get("origin") or meta.get("origin") or {}
+        d["water_mask"] = {
+            "path": raw,
+            "width": int(meta["width"]),
+            "height": int(meta["height"]),
+            "origin": (int(meta["origin"]["x"]), int(meta["origin"]["y"]),),
+            "local_origin": (int(loc_o.get("x", meta["origin"]["x"])), int(loc_o.get("y", meta["origin"]["y"]))),
+            "world_origin": d["origin"],
+        }
+        attached += 1
+    return attached
+
+
+def _crop_raw_mask(
+    path: Path,
+    height: int,
+    width: int,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    mm: np.memmap | None = None,
+) -> np.ndarray:
+    """Crop a window from a uint8 memmap, padding out-of-bounds with 0."""
+    out = np.zeros((h, w), dtype=np.uint8)
+    ix0, iy0 = max(0, x), max(0, y)
+    ix1, iy1 = min(width, x + w), min(height, y + h)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return out
+    owns = mm is None
+    if mm is None:
+        mm = np.memmap(path, dtype=np.uint8, mode="r", shape=(height, width))
+    ox0, oy0 = ix0 - x, iy0 - y
+    out[oy0 : oy0 + (iy1 - iy0), ox0 : ox0 + (ix1 - ix0)] = np.array(mm[iy0:iy1, ix0:ix1])
+    if owns:
+        del mm
+    return out
+
+
+def water_mask_roi(
+    districts: list[dict],
+    left: int,
+    top: int,
+    tw: int = TILE,
+    th: int = TILE,
+) -> np.ndarray:
+    """OR of every district water mask covering this world-space rectangle.
+
+    When a district's mask origin equals its local canvas origin (the usual
+    case), mask pixel (0, 0) is world `d['origin']`.
+    """
+    out = np.zeros((th, tw), dtype=np.uint8)
+    for d in districts:
+        wm = d.get("water_mask")
+        if not wm:
+            continue
+        wx, wy = d["origin"]
+        loc_ox, loc_oy = wm["local_origin"]
+        mox, moy = wm["origin"]
+        # world → district-local → mask pixel
+        mx = (left - wx + loc_ox) - mox
+        my = (top - wy + loc_oy) - moy
+        if "mm" not in wm:
+            wm["mm"] = np.memmap(wm["path"], dtype=np.uint8, mode="r", shape=(wm["height"], wm["width"]))
+        crop = _crop_raw_mask(wm["path"], wm["height"], wm["width"], mx, my, tw, th, mm=wm["mm"])
+        if crop.max() > 0:
+            np.maximum(out, crop, out=out)
+    return out
+
+
+def _block_std(rgb: np.ndarray, k: int = 8) -> np.ndarray:
+    """Per-block luminance std, repeated to the original resolution."""
+    lum = rgb.astype(np.float32).mean(axis=2)
+    h, w = lum.shape
+    h8, w8 = max(1, h // k), max(1, w // k)
+    cut = lum[: h8 * k, : w8 * k].reshape(h8, k, w8, k)
+    std = cut.std(axis=(1, 3))
+    out = np.repeat(np.repeat(std, k, axis=0), k, axis=1)
+    if out.shape != lum.shape:
+        padded = np.zeros_like(lum)
+        padded[: out.shape[0], : out.shape[1]] = out
+        if out.shape[0] < h:
+            padded[out.shape[0] :, : out.shape[1]] = out[-1:]
+        if out.shape[1] < w:
+            padded[:, out.shape[1] :] = padded[:, out.shape[1] - 1 : out.shape[1]]
+        return padded
+    return out
+
+
+def real_water_mask(
+    mask: np.ndarray,
+    proc: np.ndarray | None,
+    rest: np.ndarray | None = None,
+) -> np.ndarray:
+    """Ground-truth water: the kind mask, confirmed by procedural (or restyle) water.
+
+    Unpainted cells in the raw mask default to water; fog covers that default
+    outside the city, so a pixel is real water only when the mask agrees and
+    the procedural image itself looks like water. If the procedural tile is
+    missing, restyle water (including flat sgWater) is used as confirmation.
+    A mask of all zeros with clear procedural water still counts — the bay
+    can sit just outside a district mask.
+    """
+    import water_constrain as W
+
+    kind = mask > 127 if mask is not None else np.zeros((), dtype=bool)
+    if proc is not None:
+        proc_w = W.looks_like_water(proc, require_smooth=False)
+        if kind.any():
+            return kind & proc_w
+        return proc_w
+    if rest is not None:
+        rest_w = W.looks_like_water(rest, require_smooth=False)
+        if kind.any():
+            # also treat mask-water that is black or pad in the restyle as
+            # water, so a failed black restyle window still gets filled
+            fog = dark_fog_mask(rest, (0x1A, 0x1E, 0x1C))
+            lum = rest.astype(np.float32).mean(axis=2)
+            return kind & (rest_w | fog | (lum < 18))
+        return rest_w
+    return kind if kind.shape else np.zeros((TILE, TILE), dtype=bool)
+
+
+def bad_water_mask(
+    rest: np.ndarray,
+    water: np.ndarray,
+    proc: np.ndarray | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+) -> np.ndarray:
+    """Water-region pixels that should be replaced: black, pad, fog, or flat blocks."""
+    if water is None or not np.any(water):
+        return np.zeros(rest.shape[:2], dtype=bool)
+    fog = dark_fog_mask(rest, pad_rgb)
+    view = np.all(
+        np.abs(rest.astype(np.int16) - np.array(VIEW_FOG, dtype=np.int16)) <= VIEW_FOG_TOL,
+        axis=2,
+    )
+    lum = rest.astype(np.float32).mean(axis=2)
+    too_dark = lum < 18.0
+    bad = water & (fog | view | too_dark)
+    if proc is not None:
+        rest_std = _block_std(rest)
+        proc_std = _block_std(proc)
+        # Solid sgWater (or a 2-colour black+teal posterization) next to
+        # textured procedural water is the blocky bay.
+        flat = water & (rest_std < 2.5) & (proc_std > 4.0)
+        darker = water & (lum < proc.astype(np.float32).mean(axis=2) - 25) & (lum < 40)
+        bad = bad | flat | darker
+    return bad
+
+
+def _local_water_tone(rest: np.ndarray, water: np.ndarray, default: tuple[int, int, int] = RESTYLE_WATER) -> tuple[int, int, int]:
+    """Median colour of good (non-bad, chromatic) restyle water, else `default`."""
+    import water_constrain as W
+
+    good = water & W.looks_like_water(rest, require_smooth=False) & (_block_std(rest) >= 2.0)
+    if int(good.sum()) < 80:
+        good = water & W.looks_like_water(rest, require_smooth=False)
+    if int(good.sum()) < 80:
+        return default
+    med = np.median(rest[good].astype(np.float32), axis=0)
+    return (int(med[0]), int(med[1]), int(med[2]))
+
+
+def synthesize_water(
+    shape: tuple[int, ...],
+    tone: tuple[int, int, int],
+    origin: tuple[int, int],
+) -> np.ndarray:
+    """Flat restyle-water tone plus a small pixel-art grain, in RGB uint8."""
+    import water_constrain as W
+
+    h, w = shape[:2]
+    grain = W.hash_grain(origin, h, w)
+    base = np.array(tone, dtype=np.float32)
+    out = base[None, None, :] + np.stack([grain * 6.0, grain * 8.0, grain * 7.0], axis=2)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def fill_bad_water(
+    rest: np.ndarray,
+    water: np.ndarray,
+    proc: np.ndarray | None = None,
+    water_tone: tuple[int, int, int] | None = None,
+    origin: tuple[int, int] = (0, 0),
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    feather: int = 16,
+) -> tuple[np.ndarray, int]:
+    """Replace bad water pixels with tone-matched procedural water (or a grain fill).
+
+    Returns `(image, replaced_pixel_count)`. Land and good restyle water
+    are left alone; the seam is feathered.
+    """
+    import water_constrain as W
+
+    if water is None or not np.any(water):
+        return rest, 0
+    bad = bad_water_mask(rest, water, proc=proc, pad_rgb=pad_rgb)
+    if not bad.any():
+        return rest, 0
+    tone = water_tone or _local_water_tone(rest, water & ~bad)
+    if proc is not None:
+        fill = proc.astype(np.float32)
+        proc_w = W.looks_like_water(proc, require_smooth=False)
+        if proc_w.any():
+            mu = fill[proc_w].mean(axis=0)
+            fill = fill + (np.array(tone, dtype=np.float32) - mu)
+        proc_fog = dark_fog_mask(proc, pad_rgb)
+        synth = synthesize_water(rest.shape, tone, origin).astype(np.float32)
+        fill = np.where(proc_fog[:, :, None], synth, fill)
+        fill = np.clip(fill, 0, 255)
+    else:
+        fill = synthesize_water(rest.shape, tone, origin).astype(np.float32)
+    alpha = W.feather_alpha(bad, radius=feather)
+    # Never paint over land: feather lives inside the water, against the coast.
+    alpha = np.where(water, alpha, 0.0).astype(np.float32)
+    out = rest.astype(np.float32) * (1.0 - alpha[:, :, None]) + fill * alpha[:, :, None]
+    return np.clip(out, 0, 255).astype(np.uint8), int(bad.sum())
+
+
+def _atomic_save_webp(im: Image.Image, path: Path, *, lossless: bool) -> None:
+    tmp = path.with_suffix(".webp.tmp")
+    _save_webp(im, tmp, lossless=lossless)
+    tmp.replace(path)
+
+
+def polish_z0_tiles(
+    dest: Path,
+    grid: dict,
+    *,
+    districts: list[dict] | None = None,
+    proc_dest: Path | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    feather: int = EDGE_FEATHER,
+    water_tone: tuple[int, int, int] | None = None,
+    lossless_z0: bool = True,
+    progress_path: Path | None = None,
+) -> set[tuple[int, int]]:
+    """Feather dark edge fog to viewer fog and fill bad bay water, in place.
+
+    Resume-safe: a JSONL progress file records finished `tx,ty` after each
+    atomic write. Water fill runs first so dark patches in the bay become
+    water, not beige; remaining dark fog is then the true map edge.
+    Missing restyle cells that are real water (mask + procedural) are
+    created so the low-zoom pyramid has a continuous bay.
+    """
+    ox, oy = grid["ox"], grid["oy"]
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    districts = districts or []
+    if districts:
+        nmask = attach_water_masks(districts)
+        print(f"  attached {nmask} district water masks", flush=True)
+
+    done: set[tuple[int, int]] = set()
+    progress_path = progress_path or (dest / ".polish-progress.jsonl")
+    if progress_path.exists():
+        for line in progress_path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                tx_s, ty_s = line.split(",", 1)
+                done.add((int(tx_s), int(ty_s)))
+            except ValueError:
+                continue
+        print(f"  resuming polish, {len(done)} tiles already done", flush=True)
+
+    # Visit existing restyle tiles and procedural cells that may be missing
+    # restyle coverage in the bay.
+    to_visit = set(present)
+    if proc_dest is not None and (proc_dest / "0").is_dir():
+        to_visit |= present_from_disk(proc_dest, cols, rows)
+
+    t0 = time.time()
+    changed = 0
+    removed = 0
+    created = 0
+    water_px = 0
+    dest0 = dest / "0"
+    dest0.mkdir(parents=True, exist_ok=True)
+    prog = open(progress_path, "a")
+
+    def load_proc(tx: int, ty: int) -> np.ndarray | None:
+        if proc_dest is None:
+            return None
+        p = proc_dest / "0" / f"{tx}_{ty}.webp"
+        if not p.exists():
+            return None
+        with Image.open(p) as im:
+            return np.asarray(im.convert("RGB"))
+
+    try:
+        for n, (tx, ty) in enumerate(sorted(to_visit, key=lambda t: (t[1], t[0])), 1):
+            if (tx, ty) in done:
+                continue
+            left = ox + tx * TILE
+            top = oy + ty * TILE
+            path = dest0 / f"{tx}_{ty}.webp"
+            rest: np.ndarray | None = None
+            existed = path.exists()
+            if existed:
+                with Image.open(path) as im:
+                    rest = np.asarray(im.convert("RGB"))
+            proc = load_proc(tx, ty)
+            mask = water_mask_roi(districts, left, top) if districts else np.zeros((TILE, TILE), dtype=np.uint8)
+            # If we have no restyle tile, start from viewer fog so non-water
+            # stays page-coloured after a water fill.
+            if rest is None:
+                rest = np.zeros((TILE, TILE, 3), dtype=np.uint8)
+                rest[:] = VIEW_FOG
+
+            water = real_water_mask(mask, proc, rest)
+            out, n_water = fill_bad_water(
+                rest, water, proc=proc, water_tone=water_tone, origin=(left, top), pad_rgb=pad_rgb,
+            )
+            water_px += n_water
+            polished, status = smooth_edge_fog(out, pad_rgb, feather=feather)
+            if status == "empty" or (polished is not None and _almost_empty(polished, pad_rgb)):
+                if existed:
+                    path.unlink(missing_ok=True)
+                    present.discard((tx, ty))
+                    removed += 1
+                # a newly considered procedural cell that is not city stays absent
+            elif polished is None:
+                pass
+            else:
+                wrote = n_water > 0 or status == "changed" or not existed
+                if wrote:
+                    _atomic_save_webp(Image.fromarray(polished, "RGB"), path, lossless=lossless_z0)
+                    if not existed:
+                        created += 1
+                    else:
+                        changed += 1
+                present.add((tx, ty))
+            prog.write(f"{tx},{ty}\n")
+            if n % 50 == 0:
+                prog.flush()
+            if n % 200 == 0 or n == len(to_visit):
+                print(
+                    f"  polish {n}/{len(to_visit)} changed={changed} created={created} "
+                    f"removed={removed} water_px={water_px} {time.time() - t0:.1f}s",
+                    flush=True,
+                )
+    finally:
+        prog.flush()
+        prog.close()
+
+    leftover = cleanup_absent_tiles(dest, present, cols, rows)
+    if leftover:
+        print(f"  removed {leftover} leftover z0 tiles after polish", flush=True)
+    print(
+        f"  polish done: {len(present)} z0 tiles, changed={changed}, created={created}, "
+        f"removed={removed}, water_px={water_px}, {time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return present
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas."""
     cols, rows = grid["cols"], grid["rows"]
@@ -723,6 +1231,22 @@ def main() -> None:
         "--repair",
         action="store_true",
         help="re-composite only z0 restyle tiles that contain viewer-fog beige, then fill gaps",
+    )
+    ap.add_argument(
+        "--polish",
+        action="store_true",
+        help="feather dark edge fog to viewer fog and fill blocky bay water (free, no API)",
+    )
+    ap.add_argument(
+        "--pyramid-only",
+        action="store_true",
+        help="rebuild the restyle pyramid and overview from existing z0, do not reslice or polish",
+    )
+    ap.add_argument(
+        "--feather",
+        type=int,
+        default=EDGE_FEATHER,
+        help=f"edge-fog feather radius in z0 pixels (default {EDGE_FEATHER})",
     )
     ap.add_argument("--tilewise", action="store_true", help="slice from chunks/windows, never a full canvas")
     ap.add_argument(
@@ -800,7 +1324,32 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.repair:
+    if args.polish or args.pyramid_only:
+        dest = args.out / args.restyle_dir
+        if not (dest / "0").is_dir():
+            raise SystemExit(f"--polish/--pyramid-only needs existing z0 tiles at {dest / '0'}")
+        pdest = args.out / args.procedural_dir
+        proc_dest = pdest if (pdest / "0").is_dir() else None
+        if args.polish:
+            print(f"  polishing restyle z0 → {dest}", flush=True)
+            z0_present = polish_z0_tiles(
+                dest, grid,
+                districts=districts,
+                proc_dest=proc_dest,
+                pad_rgb=pad_rgb,
+                feather=args.feather,
+            )
+        else:
+            z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
+            print(f"  pyramid-only from {len(z0_present)} existing z0 tiles", flush=True)
+        # Viewer fog as pad: missing children blend into the page, no dark stairs.
+        restyle_levels = _pyramid_from_z0(dest, grid, {0: z0_present}, pad_rgb=VIEW_FOG)
+        overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
+        args.skip_restyle = True
+        args.skip_procedural = True
+        # Do not run fill_gaps: that would copy dark procedural edge fog back.
+        args._skip_fill = True
+    elif args.repair:
         if not districts:
             raise SystemExit("--repair needs --district chunks:tiles")
         dest = args.out / args.restyle_dir
@@ -871,7 +1420,7 @@ def main() -> None:
     # viewer's single restyle bitset covers every data cell.
     rdest = args.out / args.restyle_dir
     pdest = args.out / args.procedural_dir
-    if (restyle_levels is not None or args.repair) and rdest.is_dir() and (pdest / "0").is_dir():
+    if (restyle_levels is not None or args.repair) and rdest.is_dir() and (pdest / "0").is_dir() and not getattr(args, "_skip_fill", False):
         if restyle_levels is not None and restyle_levels:
             z0 = restyle_levels[0]
             present = unpack_bits(z0["tiles"], z0["cols"], z0["rows"])
