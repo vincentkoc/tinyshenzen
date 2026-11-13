@@ -89,38 +89,66 @@ if you want them; this repository is for Shenzhen.
 
 ## Optional: restyle with an image model
 
-The map itself is still drawn by the procedural renderer. If you want a richer
-isometric-pixel pass in the style of the maps people share on X (tiny.london,
-Pixel Singapore, isometric.nyc), there is an optional `restyle` command. It cuts
-a rendered PNG into overlapping windows, asks an image model to redraw each one
-while keeping the geometry, and feathers the seams (a short "hem", so
-neighbouring windows meet cleanly).
+The map itself is still drawn by the procedural renderer. A richer isometric-pixel
+pass, inspired by maps such as Pixel Singapore (the look is described in words;
+we never send third-party map images to an API or use them as training data),
+is in [`lora/`](lora/README.md). The Futian test box (23,500×11,175 px) is
+restyled in overlapping 1024-px windows with a 256-px hem, then constrained
+against the renderer's real land and water, and sliced into the viewer's tile
+pyramid. The restyle is the default layer; Settings can switch back to the
+procedural tiles when both pyramids are present.
 
-It is opt-in and reads a key from the environment. It never looks for credentials
-on disk.
+From the repo root, with the pipeline built and `OPENAI_API_KEY` set (never
+print it or write it to a file):
 
 ```bash
-# recommended: Gemini 2.5 Flash Image — cheap, and in the same family as the
-# "Nano Banana" / Gemini image models used as teachers on those isometric maps
-export GEMINI_API_KEY=...          # from https://aistudio.google.com/apikey
+# 1. procedural chunks of the Futian test box
+node --max-old-space-size=4096 lora/render_full.mjs --out /tmp/tinysz-futian
 
-# optional overrides
-# export RESTYLE_MODEL=gemini-3-pro-image-preview   # higher quality, more expensive
-# export RESTYLE_PROVIDER=openai
-# export OPENAI_API_KEY=...
-# export RESTYLE_MODEL=gpt-image-1
+# 2. tiled OpenAI restyle (--look pixelsg). Skips smooth fog windows.
+#    1024×1024 at high quality is US$0.0624 a window. Fog-skip on this box
+#    sent 190 of 465 windows, about US$11.86; 40 teacher tiles were
+#    US$2.50. A first attempt that invented a harbour was thrown away
+#    (US$1.25). All-in, about US$15.60. Do not restyle tinysz-full this way
+#    (thousands of dollars).
+python3 lora/restyle_map.py \
+  --chunks /tmp/tinysz-futian \
+  --out /tmp/tinysz-futian-restyled \
+  --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
+  --full /tmp/tinyshenzen-futian-restyled.png
 
-npm run cli -- restyle --in preview-civic-center.png --out civic-restyled.png
-# defaults: 1024 px windows, 256 px overlap
+# 3. land/water constraint (free): composite procedural pixels back wherever
+#    the restyle invented water on land, or paved over real water. Open land
+#    is tone-matched so the patch is not a flat beige sheet. Invented rooftop
+#    gardens on built roofs are restored to the procedural roof.
+node --max-old-space-size=4096 lora/render_water_mask.mjs \
+  --out /tmp/tinysz-futian/water_mask.png
+python3 lora/water_constrain.py \
+  --chunks /tmp/tinysz-futian \
+  --restyled /tmp/tinysz-futian-restyled \
+  --mask /tmp/tinysz-futian/water_mask.png \
+  --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
+  --full /tmp/tinyshenzen-futian-restyled.png
+
+# 4. slice both pyramids into the viewer (generated tiles are gitignored)
+python3 lora/slice_frontend.py \
+  --image /tmp/tinyshenzen-futian-restyled.png \
+  --chunks /tmp/tinysz-futian \
+  --out tinyworlds-frontend/public/data/tinysz \
+  --restyle-dir tiles-restyled --procedural-dir tiles
+cd tinyworlds-pipeline && TINY_OUT=../tinyworlds-frontend/public/data \
+  npm run cli -- --city tinysz index
+cd ../tinyworlds-frontend && NEXT_PUBLIC_WORLD=tinysz npm run dev
 ```
 
-Cost, roughly: a 1536×1024 preview is one or two windows (a few cents on Flash
-Image). The Futian test canvas (~23,500×11,175 px, 1024 px windows stepped by
-768) is about 450 calls — around US$15–25 with Flash Image, or US$40–70 with a
-Pro or gpt-image model. The full urban-core render would be several times that.
+A single-window restyle of a preview still works through the pipeline CLI
+(`npm run cli -- restyle --in preview.png --out out.png --look pixelsg`).
 
-Training a LoRA on teacher frames (the path used by tiny.london and Pixel
-Singapore) is not included: it needs a GPU and a training set.
+To train our own image-edit LoRA on those teacher tiles (Qwen-Image-Edit-2511,
+a 24 GB GPU, MultiDiffusion over the same hem) see [`lora/README.md`](lora/README.md).
+Teacher images and weights are not committed. That path needs a rented GPU
+(roughly US$2–6 for train plus a Futian infer) and is not started from this
+repository's default setup.
 
 ## Layout
 
@@ -146,13 +174,15 @@ Liu, X., et al., 2024, CC BY 4.0). Remaining unmapped heights are taken from
 The rendered tiles carry those attribution requirements.
 
 The idea of a city redrawn tile by tile as isometric pixel art comes from
-[tinyrj](https://tinyrj.com/) and isometric.nyc, as credited by tinyworlds; this is an
-independent, procedural take on it.
+[tinyrj](https://tinyrj.com/) and isometric.nyc, as credited by tinyworlds. The
+painted look of the optional restyle is inspired by maps such as Pixel Singapore;
+this is an independent work, and no third-party map images are used or shipped.
 
 ## Credits
 
 - [Nihey Takizawa](https://github.com/nihey) and [tinyworlds](https://github.com/nihey/tinyworlds)
 - [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - [Overture Maps Foundation](https://overturemaps.org/)
+- [East Asian Buildings](https://doi.org/10.5281/zenodo.8174931) (CC BY 4.0), via Overture
 - [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., CC BY 4.0)
 - [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., CC BY 4.0)
