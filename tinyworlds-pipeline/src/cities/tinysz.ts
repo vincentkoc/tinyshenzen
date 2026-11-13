@@ -2,6 +2,7 @@ import path from "node:path";
 import { readAreas } from "../geom/geojson.js";
 import { SHENZHEN } from "../scene/styles.js";
 import { cnbh } from "../sources/cnbh.js";
+import { globfp } from "../sources/globfp.js";
 import { overture } from "../sources/overture.js";
 import { overtureAreas } from "../sources/overtureAreas.js";
 import { HEIGHT_FIXES, LANDMARKS } from "./tinysz.landmarks.js";
@@ -75,10 +76,12 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
       "© OpenStreetMap contributors",
       "Overture Maps Foundation",
       "CNBH-10m (Wu et al., CC BY 4.0)",
+      "3D-GloBFP (Che et al., CC BY 4.0)",
     ],
     sources: [
       overture,
       cnbh,
+      globfp,
       overtureAreas({
         hoods: ["macrohood", "neighborhood"],
         rename: DISTRICT_NAMES,

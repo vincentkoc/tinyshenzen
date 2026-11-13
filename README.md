@@ -27,11 +27,16 @@ can be searched, and the towers get explicit materials, tapers and heights.
 
 Data comes from [OpenStreetMap](https://www.openstreetmap.org/copyright) and the
 [Overture Maps Foundation](https://overturemaps.org/) (the buildings theme already mixes OSM
-with the East Asian Buildings dataset, doi:10.5281/zenodo.8174931, CC BY 4.0). Heights are
-taken from mapped OSM height or floors where they exist; the rest are read from
-[CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., 2023, CC BY 4.0), a 10 m
-building-height raster for China. Overture's own fetch still needs no API key; CNBH is
-downloaded from Zenodo, also publicly.
+with the East Asian Buildings dataset, doi:10.5281/zenodo.8174931, CC BY 4.0). Missing
+footprints, and per-building heights where OSM has neither height nor floors, come from
+[3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., 2024, CC BY 4.0),
+clipped to the city box from the Figshare tiles that cover Shenzhen. Heights that 3D-GloBFP
+does not cover are read from [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al.,
+2023, CC BY 4.0), a 10 m building-height raster for China. Priority is OSM height or floors,
+then 3D-GloBFP (one height per footprint), then CNBH, then a small fallback. Only 3D-GloBFP
+outlines that do not overlap an existing footprint are added. Overture's own fetch still
+needs no API key; 3D-GloBFP and CNBH are downloaded from Figshare and Zenodo, also publicly.
+Raw tiles are cached locally and are not committed.
 
 ## Setup
 
@@ -123,8 +128,10 @@ Code is [MIT](LICENSE). The pipeline and viewer originated in
 for Tiny Shenzhen are © 2026 Vincent Koc. The MIT notice is kept in full.
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL) and the
-[Overture Maps Foundation](https://overturemaps.org/). Building heights that nobody mapped are
-taken from [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu, W., et al., 2023, CC BY 4.0).
+[Overture Maps Foundation](https://overturemaps.org/). Supplementary footprints and per-building
+heights come from [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che, Y., Li, X.,
+Liu, X., et al., 2024, CC BY 4.0). Remaining unmapped heights are taken from
+[CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu, W., et al., 2023, CC BY 4.0).
 The rendered tiles carry those attribution requirements.
 
 The idea of a city redrawn tile by tile as isometric pixel art comes from
@@ -136,3 +143,5 @@ independent, procedural take on it.
 - [Nihey Takizawa](https://github.com/nihey) and [tinyworlds](https://github.com/nihey/tinyworlds)
 - [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
 - [Overture Maps Foundation](https://overturemaps.org/)
+- [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., CC BY 4.0)
+- [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., CC BY 4.0)

@@ -1147,6 +1147,29 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
   const sampler = CITY.heights.raster ? loadHeights(DIRS.raw) : null;
   if (CITY.heights.raster && !sampler) throw new Error("no height raster: run fetch first");
   let estimated = 0;
+  let globfpHeights = 0;
+  let globfpAdded = 0;
+  const hasGlobfp = fs.existsSync(path.join(DIRS.raw, "globfp.parquet"));
+  if (hasGlobfp) {
+    // 3D-GloBFP sits above the CNBH raster: one predicted height per footprint, matched by overlap.
+    await conn.run("SET geometry_always_xy = true");
+    await conn.run(`
+      CREATE TABLE globfp_src AS
+      SELECT height::DOUBLE AS height, geometry FROM '${quote("globfp.parquet")}'
+      WHERE height IS NOT NULL AND height > 0`);
+    await conn.run(`
+      CREATE TABLE globfp_match AS
+      SELECT e.id, arg_max(g.height, ST_Area(ST_Intersection(e.geometry, g.geometry))) AS height
+      FROM '${building}' e
+      INNER JOIN globfp_src g ON ST_Intersects(e.geometry, g.geometry)
+      WHERE NOT coalesce(e.is_underground, false)
+        AND coalesce(e.class, '') <> 'bridge_structure'
+        AND (
+          ST_Area(ST_Intersection(e.geometry, g.geometry)) / NULLIF(ST_Area(e.geometry), 0) >= 0.25
+          OR ST_Area(ST_Intersection(e.geometry, g.geometry)) / NULLIF(ST_Area(g.geometry), 0) >= 0.25
+        )
+      GROUP BY e.id`);
+  }
   const caps = (CITY.heightCaps ?? []).map((cap) => ({ ...cap, at: proj.toGrid(cap.lon, cap.lat) }));
   let withParts = 0;
   // a city with no building parts gets an empty file whose geometry column has lost its type
@@ -1201,11 +1224,12 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
     grounds.set(String(id), String(name));
   await each(
     conn,
-    `SELECT id, height, num_floors, min_height, subtype, class, roof_shape, roof_height, facade_color, facade_material, roof_color,
-            ST_AsWKB(geometry), names."primary"
+    `SELECT b.id, b.height, b.num_floors, b.min_height, b.subtype, b.class, b.roof_shape, b.roof_height, b.facade_color, b.facade_material, b.roof_color,
+            ST_AsWKB(b.geometry), b.names."primary", ${hasGlobfp ? "gfp.height" : "NULL"}
      FROM '${building}' b
-     WHERE NOT coalesce(is_underground, false) AND coalesce(class, '') <> 'bridge_structure'
-       AND NOT (coalesce(has_parts, false) AND id IN (SELECT building_id FROM '${part}') ${keepStands})`,
+     ${hasGlobfp ? "LEFT JOIN globfp_match gfp ON gfp.id = b.id" : ""}
+     WHERE NOT coalesce(b.is_underground, false) AND coalesce(b.class, '') <> 'bridge_structure'
+       AND NOT (coalesce(b.has_parts, false) AND b.id IN (SELECT building_id FROM '${part}') ${keepStands})`,
     (row) => {
       const bytes = blob(row[11]);
       if (!bytes) return;
@@ -1216,12 +1240,19 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
       for (const [piece, rings] of g.parts.entries()) {
         if (coveredPieces.size > 0 && coveredPieces.has(`${row[0] as string}:${piece}`)) continue;
         let height = num(row[1]);
-        if (sampler && !(height && height > 0) && !(floors && floors > 0)) {
-          // only worth reading for a building that will be drawn
-          const [p, q] = proj.toGrid(rings[0][0], rings[0][1]);
-          if (fogAt(fog, p, q) >= keepLimit) continue;
-          height = sampler.estimate(rings[0]);
-          if (height !== null) estimated++;
+        const globfpH = num(row[13]);
+        if (!(height && height > 0) && !(floors && floors > 0)) {
+          // OSM height and floors win; 3D-GloBFP (per-footprint) sits above the CNBH raster
+          if (globfpH && globfpH > 0) {
+            height = globfpH;
+            globfpHeights++;
+          } else if (sampler) {
+            // only worth reading the raster for a building that will be drawn
+            const [p, q] = proj.toGrid(rings[0][0], rings[0][1]);
+            if (fogAt(fog, p, q) >= keepLimit) continue;
+            height = sampler.estimate(rings[0]);
+            if (height !== null) estimated++;
+          }
         }
         if (caps.length > 0 && height !== null && !str(row[12])) {
           const [p, q] = proj.toGrid(rings[0][0], rings[0][1]);
@@ -1284,9 +1315,42 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
       });
     }
   }
+  if (hasGlobfp) {
+    await each(
+      conn,
+      `SELECT g.height, ST_AsWKB(g.geometry)
+       FROM globfp_src g
+       WHERE NOT EXISTS (
+         SELECT 1 FROM '${building}' e
+         WHERE NOT coalesce(e.is_underground, false)
+           AND coalesce(e.class, '') <> 'bridge_structure'
+           AND ST_Intersects(g.geometry, e.geometry)
+           AND (
+             ST_Area(ST_Intersection(g.geometry, e.geometry)) / NULLIF(ST_Area(g.geometry), 0) >= 0.2
+             OR ST_Area(ST_Intersection(g.geometry, e.geometry)) / NULLIF(ST_Area(e.geometry), 0) >= 0.2
+           )
+       )`,
+      (row) => {
+        const bytes = blob(row[1]);
+        if (!bytes) return;
+        const g = readWkb(bytes);
+        if (!g || g.kind !== GeomKind.Polygon) return;
+        const height = num(row[0]);
+        for (const rings of g.parts) {
+          if (rings.length === 0 || rings[0].length < 6) continue;
+          const [p, q] = proj.toGrid(rings[0][0], rings[0][1]);
+          if (fogAt(fog, p, q) >= keepLimit) continue;
+          const seed = hashString(`globfp:${rings[0][0].toFixed(6)}:${rings[0][1].toFixed(6)}`);
+          addVolume(rings, seed, height, 0, { cls: "residential" });
+          globfpAdded++;
+        }
+      },
+    );
+  }
   lap(
     `volumes: ${wholeBuildings} buildings, ${withParts} parts, ${volumes.count} in all` +
-      (sampler ? `; ${estimated} heights read off the raster` : ""),
+      (sampler ? `; ${estimated} heights read off the raster` : "") +
+      (hasGlobfp ? `; ${globfpHeights} heights from 3D-GloBFP, ${globfpAdded} footprints added` : ""),
   );
 
   // ---- bridges: towers from the data, decks raised over the water, cables strung between towers

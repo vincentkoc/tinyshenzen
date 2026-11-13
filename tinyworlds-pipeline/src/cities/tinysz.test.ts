@@ -43,8 +43,10 @@ describe("tinysz", () => {
     expect(tinyszFull.flora).toBe("tropical");
     expect(tinysz.sources.map((s) => s.name)).toEqual(tinyszFull.sources.map((s) => s.name));
     expect(tinysz.sources.map((s) => s.name)).toContain("cnbh");
+    expect(tinysz.sources.map((s) => s.name)).toContain("globfp");
     expect(tinysz.heights.raster).toBe(true);
     expect(tinysz.attribution.some((a) => /CNBH-10m/.test(a))).toBe(true);
+    expect(tinysz.attribution.some((a) => /3D-GloBFP/.test(a))).toBe(true);
     expect(tinysz.sources.length).toBeGreaterThanOrEqual(3);
     expect(tinysz.bbox).toEqual(TEST_BBOX);
     expect(tinyszFull.bbox).toEqual(FULL_BBOX);
