@@ -19,9 +19,15 @@ missing bay-water from the land/water mask with a tone-matched sample
 restores land that the first pass washed out or dropped (tone-matched
 from the procedural layer) and fades the coverage edge with a single
 global signed-distance field, so the blend to viewer beige has no
-per-tile seams — including over open water. Higher zoom levels are
-rebuilt with viewer-fog padding so missing children do not become
-dark squares. Generated images are not committed.
+per-tile seams — including over open water. `--polish-vignette` is
+the preferred free edge pass: it reslices the edge from the source
+restyle windows (never from already-faded dest tiles), keeps the bay
+water fill and south-shore land restore, builds one coarse coverage
+mask with morphological cleanup, and applies a single noise-free
+vignette (~1–2 tiles) to viewer beige. It is idempotent from source.
+Higher zoom levels are rebuilt with viewer-fog padding so missing
+children do not become dark squares. Generated images are not
+committed.
 """
 
 from __future__ import annotations
@@ -1071,7 +1077,7 @@ def polish_z0_tiles(
     cols, rows = grid["cols"], grid["rows"]
     present = present_from_disk(dest, cols, rows)
     districts = districts or []
-    if districts:
+    if districts and any("chunks" in d for d in districts):
         nmask = attach_water_masks(districts)
         print(f"  attached {nmask} district water masks", flush=True)
 
@@ -1697,6 +1703,579 @@ def polish_smooth_edge(
 
 
 
+# ---------------------------------------------------------------------------
+# Third polish: rebuild the edge from source (no per-tile blur), then one
+# smooth global vignette.
+#
+# The first --polish feathered dark fog on each 512-px tile, which left
+# rounded content islands; --polish-edge's distance field wrapped those
+# islands and produced a quilted fade. This pass never reads those
+# already-faded dest tiles. It reslices each cell from the district
+# restyle windows (the plain slicer composite), fills bay water and
+# restores washed-out land, writes a clean staging copy, builds one
+# coarse coverage mask with morphological cleanup so the boundary has
+# no tile-aligned steps, and fades to viewer beige from that field
+# (~1–2 tiles, noise-free). Re-running always starts from the source
+# windows and the clean staging copies, never from dest.
+# ---------------------------------------------------------------------------
+
+VIGNETTE_FADE = 768
+VIGNETTE_INSET = 32
+VIGNETTE_SCALE = 16
+VIGNETTE_BLUR = 8
+VIGNETTE_OPEN = 3
+VIGNETTE_CLOSE = 6
+VIGNETTE_CLEAN_VERSION = "vignette-clean-1"
+VIGNETTE_FADE_VERSION = "vignette-fade-1"
+
+
+def is_flat_neutral_wash(arr: np.ndarray) -> np.ndarray:
+    """Neutral, desaturated, low-detail fringe (renderer or restyle halo).
+
+    Mid-gray flats that are not near viewer beige still count: they are
+    the washed pillows left at a restyle window's edge, not pavement
+    (pavement has pixel-art grain) and not sand (higher chroma).
+    """
+    rgb = arr[:, :, :3] if arr.ndim == 3 and arr.shape[2] == 4 else arr
+    chroma = rgb.max(axis=2).astype(np.float32) - rgb.min(axis=2).astype(np.float32)
+    lum = rgb.astype(np.float32).mean(axis=2)
+    std = _block_std(rgb, 8)
+    return (chroma < 16) & (std < 7.0) & (lum > 90) & (lum < 210)
+
+
+def source_content_mask(arr: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Solid source content: not fog, not beige, not a flat gray wash."""
+    return core_content_mask(arr, pad_rgb) & ~is_flat_neutral_wash(arr)
+
+
+def strip_uncovered(arr: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Keep solid content; replace fog, pad and washed halo with viewer beige."""
+    content = source_content_mask(arr, pad_rgb)
+    out = np.empty_like(arr)
+    out[:] = VIEW_FOG
+    if content.any():
+        out[content] = arr[content]
+    return out
+
+
+def reslice_z0_from_source(
+    districts: list[dict],
+    grid: dict,
+    tx: int,
+    ty: int,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+) -> np.ndarray | None:
+    """Plain-slicer composite of one z0 cell from district restyle windows.
+
+    The canvas starts as viewer beige. Renderer fog, pad and unpainted
+    beige in the windows are skipped (same rule as `composite_district`).
+    Returns None when no district paints this cell.
+    """
+    ox, oy = grid["ox"], grid["oy"]
+    left, top = ox + tx * TILE, oy + ty * TILE
+    tile = Image.new("RGB", (TILE, TILE), VIEW_FOG)
+    painted = False
+    for d in districts:
+        roi = extract_district_roi(
+            d["tiles"], d["windows"], d["origin"], d["width"], d["height"],
+            left, top, TILE, TILE,
+        )
+        if roi is None:
+            continue
+        tile = composite_district(tile, roi, pad_rgb)
+        painted = True
+    if not painted:
+        return None
+    arr = np.asarray(tile)
+    if arr.shape[0] != TILE or arr.shape[1] != TILE:
+        arr = np.array(Image.fromarray(arr).resize((TILE, TILE), Image.Resampling.NEAREST))
+    return strip_uncovered(arr, pad_rgb)
+
+
+def prepare_clean_tile(
+    rest: np.ndarray | None,
+    proc: np.ndarray | None,
+    mask: np.ndarray | None,
+    *,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    water_tone: tuple[int, int, int] | None = None,
+    origin: tuple[int, int] = (0, 0),
+) -> tuple[np.ndarray | None, int, int]:
+    """Water-fill and land-restore a freshly resliced tile; no per-tile blur.
+
+    Uncovered pixels (fog, halo) become viewer beige so a later fade
+    never blends leftover gray wash. Returns `(image, water_px, land_px)`
+    or `(None, 0, 0)` when the cell is empty after both fills.
+    """
+    if rest is None:
+        rest = np.empty((TILE, TILE, 3), dtype=np.uint8)
+        rest[:] = VIEW_FOG
+    else:
+        rest = strip_uncovered(rest, pad_rgb)
+    if mask is None:
+        mask = np.zeros((TILE, TILE), dtype=np.uint8)
+    water = real_water_mask(mask, proc, rest)
+    out, n_water = fill_bad_water(
+        rest, water, proc=proc, water_tone=water_tone, origin=origin, pad_rgb=pad_rgb,
+    )
+    n_land = 0
+    if proc is not None:
+        out, n_land = restore_from_procedural(out, proc, pad_rgb=pad_rgb)
+    out = strip_uncovered(out, pad_rgb)
+    if _almost_empty(out, pad_rgb):
+        return None, n_water, n_land
+    return out, n_water, n_land
+
+
+def morph_open(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Erode then dilate: drop isolated islands smaller than `radius`."""
+    if radius <= 0:
+        return mask
+    d_in = chamfer_distance(~mask, radius + 1)
+    eroded = mask & (d_in >= radius)
+    d_out = chamfer_distance(eroded, radius + 1)
+    return eroded | (d_out <= radius)
+
+
+def morph_close(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Dilate then erode: fill notches smaller than `radius`."""
+    if radius <= 0:
+        return mask
+    d_out = chamfer_distance(mask, radius + 1)
+    dilated = mask | (d_out <= radius)
+    d_in = chamfer_distance(~dilated, radius + 1)
+    return dilated & (d_in >= radius)
+
+
+def smooth_coverage_mask(
+    acc: np.ndarray,
+    *,
+    threshold: float = 0.4,
+    blur: int = VIGNETTE_BLUR,
+    open_r: int = VIGNETTE_OPEN,
+    close_r: int = VIGNETTE_CLOSE,
+) -> np.ndarray:
+    """Threshold a coarse content-fraction field after a blur and open/close.
+
+    The Gaussian blur (in coarse pixels) rounds tile-aligned stairs;
+    opening drops per-tile islands; closing fills small notches. The
+    result is a single organic coverage region, not a grid of blobs.
+    """
+    field = acc.astype(np.float32)
+    if blur > 0:
+        # PIL GaussianBlur on a 0–255 L image, then back to 0–1.
+        raw = np.clip(np.round(field * 255.0), 0, 255).astype(np.uint8)
+        sm = Image.fromarray(raw, "L").filter(ImageFilter.GaussianBlur(radius=float(blur)))
+        field = np.asarray(sm, dtype=np.float32) / 255.0
+    mask = field >= threshold
+    mask = morph_open(mask, open_r)
+    mask = morph_close(mask, close_r)
+    return mask
+
+
+def fade_stamp(fade: int, inset: int, scale: int, blur: int, open_r: int, close_r: int) -> str:
+    return (
+        f"{VIGNETTE_FADE_VERSION} fade={fade} inset={inset} scale={scale} "
+        f"blur={blur} open={open_r} close={close_r}\n"
+    )
+
+
+def _candidate_cells(
+    districts: list[dict],
+    grid: dict,
+    dest: Path,
+    proc_dest: Path | None,
+    clean_dest: Path,
+) -> set[tuple[int, int]]:
+    ox, oy = grid["ox"], grid["oy"]
+    cols, rows = grid["cols"], grid["rows"]
+    cells = present_from_disk(dest, cols, rows)
+    if proc_dest is not None:
+        cells |= present_from_disk(proc_dest, cols, rows)
+    cells |= present_from_disk(clean_dest, cols, rows)
+    for d in districts:
+        x0, y0 = d["origin"]
+        x1, y1 = x0 + d["width"], y0 + d["height"]
+        tx0 = max(0, (x0 - ox) // TILE)
+        ty0 = max(0, (y0 - oy) // TILE)
+        tx1 = min(cols - 1, (x1 - 1 - ox) // TILE)
+        ty1 = min(rows - 1, (y1 - 1 - oy) // TILE)
+        for ty in range(ty0, ty1 + 1):
+            for tx in range(tx0, tx1 + 1):
+                cells.add((tx, ty))
+    return cells
+
+
+def reslice_clean_tiles(
+    dest: Path,
+    grid: dict,
+    districts: list[dict],
+    *,
+    proc_dest: Path | None = None,
+    clean_dest: Path | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    water_tone: tuple[int, int, int] | None = None,
+    lossless_z0: bool = True,
+    progress_path: Path | None = None,
+) -> Path:
+    """Reslice every candidate cell from source into `clean_dest`. Resume-safe.
+
+    Dest is not written. Each finished `tx,ty` is appended to the
+    progress file, including cells that produced no clean tile.
+    """
+    ox, oy = grid["ox"], grid["oy"]
+    cols, rows = grid["cols"], grid["rows"]
+    clean_dest = clean_dest or (dest / ".vignette-clean")
+    (clean_dest / "0").mkdir(parents=True, exist_ok=True)
+    if districts and any("chunks" in d for d in districts):
+        nmask = attach_water_masks(districts)
+        print(f"  attached {nmask} district water masks", flush=True)
+    progress_path = progress_path or (clean_dest / ".vignette-reslice.jsonl")
+    done = _load_progress(progress_path)
+    if done:
+        print(f"  resuming clean reslice, {len(done)} cells already done", flush=True)
+    to_visit = _candidate_cells(districts, grid, dest, proc_dest, clean_dest)
+    t0 = time.time()
+    written = skipped = water_px = land_px = 0
+    prog = open(progress_path, "a")
+
+    def load_proc(tx: int, ty: int) -> np.ndarray | None:
+        if proc_dest is None:
+            return None
+        p = proc_dest / "0" / f"{tx}_{ty}.webp"
+        if not p.exists():
+            return None
+        with Image.open(p) as im:
+            return np.asarray(im.convert("RGB"))
+
+    try:
+        cells = sorted(to_visit, key=lambda t: (t[1], t[0]))
+        for n, (tx, ty) in enumerate(cells, 1):
+            if (tx, ty) in done:
+                continue
+            left, top = ox + tx * TILE, oy + ty * TILE
+            rest = reslice_z0_from_source(districts, grid, tx, ty, pad_rgb=pad_rgb)
+            proc = load_proc(tx, ty)
+            mask = water_mask_roi(districts, left, top) if districts else None
+            if rest is None and proc is None:
+                path = clean_dest / "0" / f"{tx}_{ty}.webp"
+                if path.exists():
+                    path.unlink()
+                prog.write(f"{tx},{ty}\n")
+                skipped += 1
+                if n % 200 == 0 or n == len(cells):
+                    print(
+                        f"  reslice {n}/{len(cells)} written={written} skipped={skipped} "
+                        f"water_px={water_px} land_px={land_px} {time.time() - t0:.1f}s",
+                        flush=True,
+                    )
+                continue
+            out, n_water, n_land = prepare_clean_tile(
+                rest, proc, mask, pad_rgb=pad_rgb, water_tone=water_tone, origin=(left, top),
+            )
+            water_px += n_water
+            land_px += n_land
+            path = clean_dest / "0" / f"{tx}_{ty}.webp"
+            if out is None:
+                if path.exists():
+                    path.unlink()
+                skipped += 1
+            else:
+                _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=lossless_z0)
+                written += 1
+            prog.write(f"{tx},{ty}\n")
+            if n % 50 == 0:
+                prog.flush()
+            if n % 200 == 0 or n == len(cells):
+                print(
+                    f"  reslice {n}/{len(cells)} written={written} skipped={skipped} "
+                    f"water_px={water_px} land_px={land_px} {time.time() - t0:.1f}s",
+                    flush=True,
+                )
+    finally:
+        prog.flush()
+        prog.close()
+    print(
+        f"  clean reslice done: written={written} skipped={skipped} "
+        f"water_px={water_px} land_px={land_px}, {time.time() - t0:.1f}s",
+        flush=True,
+    )
+    (clean_dest / ".vignette-reslice-done").write_text(VIGNETTE_CLEAN_VERSION + "\n")
+    return clean_dest
+
+
+def build_vignette_field(
+    clean_dest: Path,
+    grid: dict,
+    *,
+    scale: int = VIGNETTE_SCALE,
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    blur: int = VIGNETTE_BLUR,
+    open_r: int = VIGNETTE_OPEN,
+    close_r: int = VIGNETTE_CLOSE,
+    threshold: float = 0.4,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+) -> np.ndarray:
+    """Coarse signed-distance field, in z0 pixels, from the clean staging tiles."""
+    cols, rows = grid["cols"], grid["rows"]
+    h8, w8 = TILE // scale, TILE // scale
+    ch, cw = rows * h8, cols * w8
+    acc = np.zeros((ch, cw), dtype=np.float32)
+    t0 = time.time()
+    n = 0
+    z0 = clean_dest / "0"
+    if z0.exists():
+        for path in z0.glob("*.webp"):
+            stem = path.stem
+            if "_" not in stem:
+                continue
+            sx, sy = stem.split("_", 1)
+            try:
+                tx, ty = int(sx), int(sy)
+            except ValueError:
+                continue
+            if tx < 0 or ty < 0 or tx >= cols or ty >= rows:
+                continue
+            with Image.open(path) as im:
+                arr = np.asarray(im.convert("RGB"))
+            if arr.shape[0] != TILE or arr.shape[1] != TILE:
+                arr = np.array(Image.fromarray(arr).resize((TILE, TILE), Image.Resampling.NEAREST))
+            content = core_content_mask(arr, pad_rgb)
+            block = content[: h8 * scale, : w8 * scale].reshape(h8, scale, w8, scale).mean(axis=(1, 3))
+            acc[ty * h8 : (ty + 1) * h8, tx * w8 : (tx + 1) * w8] = block
+            n += 1
+            if n % 1000 == 0:
+                print(f"  coverage {n} clean tiles, {time.time() - t0:.1f}s", flush=True)
+    print(f"  smoothing coarse coverage ({cw}×{ch}, blur={blur}, open={open_r}, close={close_r})", flush=True)
+    mask = smooth_coverage_mask(acc, threshold=threshold, blur=blur, open_r=open_r, close_r=close_r)
+    max_r = int(np.ceil((fade + inset) / scale) + 3)
+    print(f"  chamfer on {cw}×{ch} coarse grid, max_r={max_r}, content frac={float(mask.mean()):.3f}…", flush=True)
+    signed = signed_distance_field(mask, max_r)
+    signed *= np.float32(scale)
+    print(f"  vignette field from {n} clean tiles, {time.time() - t0:.1f}s", flush=True)
+    return signed
+
+
+def edge_band_from_field(
+    field: np.ndarray,
+    grid: dict,
+    *,
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    scale: int = VIGNETTE_SCALE,
+    margin: int = 32,
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Tiles the fade touches, and tiles that sit fully past the fade (exterior).
+
+    A tile is in the edge band when its coarse distance range overlaps
+    `(-inset - margin, fade + margin)`. Fully-exterior tiles (min dist
+    greater than the fade) should be removed from dest if present.
+    Deep-interior tiles are left alone.
+    """
+    cols, rows = grid["cols"], grid["rows"]
+    h8, w8 = TILE // scale, TILE // scale
+    band: set[tuple[int, int]] = set()
+    exterior: set[tuple[int, int]] = set()
+    lo, hi = -float(inset + margin), float(fade + margin)
+    for ty in range(rows):
+        for tx in range(cols):
+            block = field[ty * h8 : (ty + 1) * h8, tx * w8 : (tx + 1) * w8]
+            if block.size == 0:
+                continue
+            dmin = float(block.min())
+            dmax = float(block.max())
+            if dmin > fade:
+                exterior.add((tx, ty))
+            elif dmax >= lo and dmin <= hi:
+                band.add((tx, ty))
+    return band, exterior
+
+
+def apply_vignette_fade(
+    dest: Path,
+    grid: dict,
+    field: np.ndarray,
+    clean_dest: Path,
+    *,
+    scale: int = VIGNETTE_SCALE,
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    lossless_z0: bool = True,
+    progress_path: Path | None = None,
+    edge_list_path: Path | None = None,
+) -> set[tuple[int, int]]:
+    """Fade clean staging tiles onto dest for the edge band only.
+
+    Reads only from `clean_dest` (and the distance field), never from
+    dest's existing pixels, so a re-run cannot stack fades. Resume-safe.
+    """
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    band, exterior = edge_band_from_field(field, grid, fade=fade, inset=inset, scale=scale)
+    edge_list_path = edge_list_path or (dest / ".vignette-edge.jsonl")
+    with open(edge_list_path, "w") as el:
+        for tx, ty in sorted(band, key=lambda t: (t[1], t[0])):
+            el.write(f"{tx},{ty}\n")
+    print(
+        f"  edge band {len(band)} tiles, exterior {len(exterior)}, list {edge_list_path}",
+        flush=True,
+    )
+    # Drop dest tiles that sit fully past the vignette (all beige).
+    dest0 = dest / "0"
+    removed_ext = 0
+    for tx, ty in exterior:
+        path = dest0 / f"{tx}_{ty}.webp"
+        if path.exists():
+            path.unlink()
+            removed_ext += 1
+        present.discard((tx, ty))
+    if removed_ext:
+        print(f"  removed {removed_ext} fully-exterior dest tiles", flush=True)
+
+    progress_path = progress_path or (dest / ".vignette-fade.jsonl")
+    done = _load_progress(progress_path)
+    if done:
+        print(f"  resuming vignette fade, {len(done)} tiles already done", flush=True)
+    t0 = time.time()
+    changed = removed = created = 0
+    prog = open(progress_path, "a")
+    try:
+        tiles = sorted(band, key=lambda t: (t[1], t[0]))
+        for n, (tx, ty) in enumerate(tiles, 1):
+            if (tx, ty) in done:
+                # dest may already have the faded tile from a previous run
+                if (dest0 / f"{tx}_{ty}.webp").exists():
+                    present.add((tx, ty))
+                else:
+                    present.discard((tx, ty))
+                continue
+            clean_path = clean_dest / "0" / f"{tx}_{ty}.webp"
+            dest_path = dest0 / f"{tx}_{ty}.webp"
+            existed = dest_path.exists()
+            if clean_path.exists():
+                with Image.open(clean_path) as im:
+                    arr = np.asarray(im.convert("RGB"))
+            else:
+                arr = np.empty((TILE, TILE, 3), dtype=np.uint8)
+                arr[:] = VIEW_FOG
+            dist = upsample_distance(field, tx, ty, scale=scale)
+            out, status = apply_coverage_fade(arr, dist, fade=fade, inset=inset, pad_rgb=pad_rgb)
+            if status == "empty" or out is None or (out is not None and _almost_empty(out, pad_rgb)):
+                if existed:
+                    dest_path.unlink(missing_ok=True)
+                    removed += 1
+                present.discard((tx, ty))
+            else:
+                _atomic_save_webp(Image.fromarray(out, "RGB"), dest_path, lossless=lossless_z0)
+                present.add((tx, ty))
+                if existed:
+                    changed += 1
+                else:
+                    created += 1
+            prog.write(f"{tx},{ty}\n")
+            if n % 50 == 0:
+                prog.flush()
+            if n % 200 == 0 or n == len(tiles):
+                print(
+                    f"  vignette {n}/{len(tiles)} changed={changed} created={created} "
+                    f"removed={removed} {time.time() - t0:.1f}s",
+                    flush=True,
+                )
+    finally:
+        prog.flush()
+        prog.close()
+    leftover = cleanup_absent_tiles(dest, present, cols, rows)
+    if leftover:
+        print(f"  removed {leftover} leftover z0 tiles after vignette", flush=True)
+    print(
+        f"  vignette done: present={len(present)} changed={changed} created={created} "
+        f"removed={removed}, {time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return present
+
+
+def polish_vignette(
+    dest: Path,
+    grid: dict,
+    districts: list[dict],
+    *,
+    proc_dest: Path | None = None,
+    clean_dest: Path | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    scale: int = VIGNETTE_SCALE,
+    blur: int = VIGNETTE_BLUR,
+    open_r: int = VIGNETTE_OPEN,
+    close_r: int = VIGNETTE_CLOSE,
+    lossless_z0: bool = True,
+) -> set[tuple[int, int]]:
+    """Rebuild the edge from source and apply one global beige vignette.
+
+    Three resume-safe stages: a clean reslice into `.vignette-clean`
+    (from district windows + water fill + land restore, never from dest),
+    a coarse signed-distance field with morphological cleanup
+    (`.vignette-dist.npz`), and the fade onto dest (`.vignette-fade.jsonl`).
+    Changing fade parameters discards only the field and fade progress;
+    the clean staging is reused.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    clean_dest = clean_dest or (dest / ".vignette-clean")
+    done_mark = clean_dest / ".vignette-reslice-done"
+    if done_mark.exists() and done_mark.read_text().strip() == VIGNETTE_CLEAN_VERSION:
+        print(f"  clean staging already complete at {clean_dest}, skipping reslice", flush=True)
+    else:
+        print(f"  reslicing clean tiles from source → {clean_dest}", flush=True)
+        reslice_clean_tiles(
+            dest, grid, districts,
+            proc_dest=proc_dest, clean_dest=clean_dest,
+            pad_rgb=pad_rgb, lossless_z0=lossless_z0,
+        )
+
+    stamp = fade_stamp(fade, inset, scale, blur, open_r, close_r)
+    stamp_path = dest / ".vignette-fade-stamp"
+    dist_path = dest / ".vignette-dist.npz"
+    fade_progress = dest / ".vignette-fade.jsonl"
+    if stamp_path.exists() and stamp_path.read_text() != stamp:
+        print("  fade parameters changed, rebuilding coverage and fade", flush=True)
+        dist_path.unlink(missing_ok=True)
+        fade_progress.unlink(missing_ok=True)
+    field = None
+    if dist_path.exists():
+        try:
+            data = np.load(dist_path)
+            field = data["field"]
+            h8, w8 = TILE // scale, TILE // scale
+            expect = (grid["rows"] * h8, grid["cols"] * w8)
+            if field.shape != expect:
+                print(f"  cached field {field.shape} != {expect}, rebuilding", flush=True)
+                field = None
+            else:
+                print(f"  loaded cached vignette field {field.shape}", flush=True)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"  could not load cached field ({exc}), rebuilding", flush=True)
+            field = None
+    if field is None:
+        field = build_vignette_field(
+            clean_dest, grid, scale=scale, fade=fade, inset=inset,
+            blur=blur, open_r=open_r, close_r=close_r, pad_rgb=pad_rgb,
+        )
+        np.savez_compressed(dist_path, field=field)
+        print(f"  wrote {dist_path}", flush=True)
+    stamp_path.write_text(stamp)
+
+    print(f"  applying vignette fade (fade={fade}px, inset={inset}px) from clean staging", flush=True)
+    present = apply_vignette_fade(
+        dest, grid, field, clean_dest,
+        scale=scale, fade=fade, inset=inset, pad_rgb=pad_rgb,
+        lossless_z0=lossless_z0, progress_path=fade_progress,
+    )
+    return present
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
@@ -1776,10 +2355,15 @@ def main() -> None:
         help="restore washed-out land from the procedural layer, then fade the coverage edge with a global distance field (no tile seams)",
     )
     ap.add_argument(
+        "--polish-vignette",
+        action="store_true",
+        help="rebuild the edge from source (no per-tile blur) and apply one smooth global beige vignette (free, idempotent, no API)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
-        default=EDGE_FADE,
-        help=f"global edge-fade radius in z0 pixels (default {EDGE_FADE})",
+        default=None,
+        help="global edge-fade radius in z0 pixels (default: 128 for --polish-edge, 768 for --polish-vignette)",
     )
     ap.add_argument(
         "--pyramid-only",
@@ -1868,10 +2452,10 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
-            raise SystemExit(f"--polish/--polish-edge/--pyramid-only needs existing z0 tiles at {dest / '0'}")
+            raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
         pdest = args.out / args.procedural_dir
         proc_dest = pdest if (pdest / "0").is_dir() else None
         if args.polish:
@@ -1883,13 +2467,25 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 feather=args.feather,
             )
+        elif args.polish_vignette:
+            if not districts:
+                raise SystemExit("--polish-vignette needs --district chunks:tiles to reslice from source")
+            fade = args.fade if args.fade is not None else VIGNETTE_FADE
+            print(f"  vignette from source (fade={fade}px) → {dest}", flush=True)
+            z0_present = polish_vignette(
+                dest, grid, districts,
+                proc_dest=proc_dest,
+                pad_rgb=pad_rgb,
+                fade=fade,
+            )
         elif args.polish_edge:
+            fade = args.fade if args.fade is not None else EDGE_FADE
             print(f"  smoothing coverage edge → {dest}", flush=True)
             z0_present = polish_smooth_edge(
                 dest, grid,
                 proc_dest=proc_dest,
                 pad_rgb=pad_rgb,
-                fade=args.fade,
+                fade=fade,
             )
         else:
             z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
