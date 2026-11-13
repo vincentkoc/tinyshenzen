@@ -198,6 +198,6 @@ Rough time and cost, 24 GB card, musubi-tuner fp8 + block swap (slower than a
 | `restyle_map.py` | OpenAI tiled restyle of that render (resume-safe, `--quality`, `--shard I/N`, `--windows`, `--count-only`). |
 | `render_water_mask.mjs` | Rasterize real water/land from the scene's ground kinds. |
 | `water_constrain.py` | Feathered composite that undoes invented (or missing) water. |
-| `slice_frontend.py` | Cut the stitch into the viewer's 512-px webp pyramid. `--polish` feathers dark edge fog to viewer beige and fills blocky bay water; no API calls. |
+| `slice_frontend.py` | Cut the stitch into the viewer's 512-px webp pyramid. `--polish` feathers dark edge fog and fills bay water; `--polish-edge` restores washed-out land and fades the coverage edge with a global distance field. No API calls. |
 | `tiles.py`, `blend.py` | Shared window grid and hem. |
 | `test_tiles.py` | CPU unit tests. |
