@@ -15,6 +15,7 @@ import blend
 import restyle_map
 import prepare_dataset
 import water_constrain as W
+import slice_frontend as SF
 import tiles as T
 from tiles import Tile
 
@@ -234,6 +235,46 @@ class WaterConstrainTest(unittest.TestCase):
         self.assertNotEqual(edge, left)
         self.assertNotEqual(edge, right)
 
+
+
+class SliceFrontendTest(unittest.TestCase):
+    def test_futian_grid_matches_pipeline(self):
+        # minX -11950, minY -6000, maxX 11550, maxY 5175
+        g = SF.make_grid(-11950, -6000, 11550, 5175)
+        self.assertEqual(g["ox"], -12288)
+        self.assertEqual(g["oy"], -6144)
+        self.assertEqual(g["cols"], 48)
+        self.assertEqual(g["rows"], 24)
+        self.assertEqual(g["ccols"], 12)
+        self.assertEqual(g["crows"], 6)
+        self.assertEqual(g["chunk"], 2048)
+
+    def test_pack_bits_is_lsb_first_row_major(self):
+        # 2×2, all present: bits 0..3 set → 0x0F → "Dw=="
+        self.assertEqual(SF.pack_bits({(0, 0), (1, 0), (0, 1), (1, 1)}, 2, 2), "Dw==")
+        # only (0, 0): bit 0 → 0x01 → "AQ=="
+        self.assertEqual(SF.pack_bits({(0, 0)}, 2, 2), "AQ==")
+
+    def test_slice_writes_a_pyramid(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # 600×400 image, origin at (0,0) → grid origin 0,0, 1×1 chunk = 4×4 tiles of 512
+            # max 600,400 → ccols=1, crows=1, 4×4 tiles. Only (0,0) has content.
+            im = Image.new("RGB", (600, 400), (20, 30, 40))
+            for y in range(400):
+                for x in range(600):
+                    im.putpixel((x, y), (x % 250, y % 250, 80))
+            g = SF.make_grid(0, 0, 600, 400)
+            self.assertEqual((g["cols"], g["rows"]), (4, 4))
+            dest = root / "tiles"
+            levels = SF.slice_image(im, g, (0, 0), dest, pad_rgb=(0, 0, 0))
+            self.assertGreaterEqual(len(levels), 2)
+            self.assertEqual(levels[0]["z"], 0)
+            self.assertTrue((dest / "0" / "0_0.webp").exists())
+            # the far pad tiles are empty and skipped
+            self.assertFalse((dest / "0" / "3_3.webp").exists())
+            # a parent exists
+            self.assertTrue(any((dest / str(l["z"])).exists() for l in levels if l["z"] > 0))
 
 
 if __name__ == "__main__":

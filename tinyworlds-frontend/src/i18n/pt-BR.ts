@@ -29,6 +29,7 @@ export const ptBR: Strings = {
     strength: "Intensidade",
     tiltStrengthLabel: "Intensidade do desfoque de miniatura",
     life: "Vida no mapa",
+    restyle: "Estilo Pixel Singapore",
     timeOfDay: "Hora do dia",
     themes: { system: "Auto", light: "Dia", dark: "Noite" },
     language: "Idioma",

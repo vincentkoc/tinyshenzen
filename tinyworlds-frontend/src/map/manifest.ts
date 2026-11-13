@@ -49,6 +49,8 @@ export interface Manifest {
   /** the image spans `bounds` */
   overview: { src: string; width: number; height: number };
   attribution: string[];
+  /** When set, the viewer can switch to this second tile pyramid (a restyle of the same grid). */
+  restyle?: { dir: string };
 }
 
 export type PlaceType =
@@ -142,5 +144,9 @@ export function parseManifest(json: unknown): Manifest {
     attribution: Array.isArray(m.attribution)
       ? m.attribution.filter((a) => typeof a === "string")
       : [],
+    restyle:
+      isObj(m.restyle) && typeof (m.restyle as { dir?: unknown }).dir === "string"
+        ? { dir: (m.restyle as { dir: string }).dir }
+        : undefined,
   };
 }

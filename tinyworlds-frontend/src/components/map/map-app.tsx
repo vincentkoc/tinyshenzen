@@ -120,7 +120,11 @@ export function MapApp() {
           canvas,
           marks,
           manifest,
-          tileUrl: (z, tx, ty) => dataUrl(`tiles/${z}/${tx}_${ty}.webp`, manifest.build),
+          tileUrl: (z, tx, ty) => {
+            const restyleOn = prefsStore.getSnapshot().restyle;
+            const dir = restyleOn && manifest.restyle?.dir ? manifest.restyle.dir : "tiles";
+            return dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, manifest.build);
+          },
           fileUrl: (path) => dataUrl(path, manifest.indexes),
           reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
           start: parseHash(window.location.hash) ?? undefined,
@@ -233,6 +237,11 @@ export function MapApp() {
   // settings → engine
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
+  useEffect(() => {
+    if (!engine || !session) return;
+    const dir = prefs.restyle && session.manifest.restyle?.dir ? session.manifest.restyle.dir : "tiles";
+    engine.setTileUrl((z, tx, ty) => dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, session.manifest.build));
+  }, [engine, session, prefs.restyle]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
 
   // the view lives in the URL, so any spot can be shared
@@ -468,7 +477,14 @@ export function MapApp() {
             }
             settingsOpen={settingsOpen}
             onSettingsOpenChange={setSettingsOpen}
-            settings={<SettingsPanel prefs={prefs} onChange={setPrefs} hoodLines={hasHoods} />}
+            settings={
+              <SettingsPanel
+                prefs={prefs}
+                onChange={setPrefs}
+                hoodLines={hasHoods}
+                hasRestyle={Boolean(session.manifest.restyle)}
+              />
+            }
             className="sign-in fixed top-[calc(var(--edge-t)+3.9375rem)] right-(--edge-r) sm:top-(--edge-t)"
             style={delay(140)}
           />

@@ -29,6 +29,7 @@ export const esES: Strings = {
     strength: "Intensidad",
     tiltStrengthLabel: "Intensidad del efecto maqueta",
     life: "Vida en el mapa",
+    restyle: "Estilo Pixel Singapore",
     timeOfDay: "Hora del día",
     themes: { system: "Auto", light: "Día", dark: "Noche" },
     language: "Idioma",

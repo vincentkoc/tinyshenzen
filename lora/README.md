@@ -79,6 +79,19 @@ python3 lora/water_constrain.py \
   --full /workspace/tinyshenzen-futian-restyled.png
 ```
 
+To put the constrained stitch into the viewer, slice it onto the same 512-px
+grid `makeGrid` uses (`origin` −12288,−6144 for the Futian test box). The
+restyle is the default layer; when a procedural pyramid is also written, the
+settings panel can switch.
+
+```bash
+python3 lora/slice_frontend.py \
+  --image /workspace/tinyshenzen-futian-restyled.png \
+  --out tinyworlds-frontend/public/data/tinysz \
+  --restyle-dir tiles --skip-procedural
+```
+
+Generated images are not committed (`public/data/` is gitignored).
 
 ## Phase 2 — dataset, train, MultiDiffusion
 
@@ -158,5 +171,6 @@ Rough time and cost, 24 GB card, musubi-tuner fp8 + block swap (slower than a
 | `restyle_map.py` | OpenAI tiled restyle of that render (resume-safe). |
 | `render_water_mask.mjs` | Rasterize real water/land from the scene's ground kinds. |
 | `water_constrain.py` | Feathered composite that undoes invented (or missing) water. |
+| `slice_frontend.py` | Cut the stitch into the viewer's 512-px webp pyramid. |
 | `tiles.py`, `blend.py` | Shared window grid and hem. |
 | `test_tiles.py` | CPU unit tests. |

@@ -59,6 +59,8 @@ export interface Strings {
     strength: string;
     tiltStrengthLabel: string;
     life: string;
+    /** switch between the procedural tiles and a restyled set, when the world has one */
+    restyle: string;
     timeOfDay: string;
     themes: { system: string; light: string; dark: string };
     language: string;

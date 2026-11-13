@@ -47,9 +47,11 @@ interface SettingsPanelProps {
   onChange: (patch: Partial<Prefs>) => void;
   /** the world has outlines to draw (hoods.json is not empty) */
   hoodLines: boolean;
+  /** the world has a restyled tile pyramid next to the procedural one */
+  hasRestyle?: boolean;
 }
 
-export function SettingsPanel({ prefs, onChange, hoodLines }: SettingsPanelProps) {
+export function SettingsPanel({ prefs, onChange, hoodLines, hasRestyle }: SettingsPanelProps) {
   const strengthId = useId();
   const { t, copy } = useI18n();
   const keys: [string[], string][] = [
@@ -104,6 +106,13 @@ export function SettingsPanel({ prefs, onChange, hoodLines }: SettingsPanelProps
         )}
       </Row>
       <Row label={t.settings.life} checked={prefs.life} onChange={(life) => onChange({ life })} />
+      {hasRestyle && (
+        <Row
+          label={t.settings.restyle}
+          checked={prefs.restyle}
+          onChange={(restyle) => onChange({ restyle })}
+        />
+      )}
 
       <div className="flex items-center gap-2 px-3.5 pt-2 pb-2.5">
         <span id={`${strengthId}-theme`} className="flex-1 text-sm font-medium">

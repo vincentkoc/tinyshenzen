@@ -138,4 +138,12 @@ describe("parseManifest", () => {
     expect(parseManifest({ ...valid, build: "t1", indexes: "" }).indexes).toBe("t1");
     expect(parseManifest({ ...valid, build: "t1", indexes: 7 }).indexes).toBe("t1");
   });
+
+  it("keeps a restyle layer when the manifest names one", () => {
+    expect(parseManifest(valid).restyle).toBeUndefined();
+    expect(parseManifest({ ...valid, restyle: { dir: "tiles-restyled" } }).restyle).toEqual({
+      dir: "tiles-restyled",
+    });
+    expect(parseManifest({ ...valid, restyle: { dir: 4 } }).restyle).toBeUndefined();
+  });
 });

@@ -16,6 +16,8 @@ export interface Prefs {
   life: boolean;
   /** the interface's language; "auto" follows the browser */
   lang: LocalePref;
+  /** when the world has a restyled tile set, use it (the procedural tiles are the other choice) */
+  restyle: boolean;
 }
 
 /** One namespace per world (and one for the front page), so worlds on one origin keep their own settings. */
@@ -29,6 +31,7 @@ export const DEFAULT_PREFS: Prefs = {
   theme: "system",
   life: true,
   lang: "auto",
+  restyle: true,
 };
 
 /** Keeps what is valid in a stored value and fills the rest with defaults. */
@@ -40,6 +43,7 @@ export function sanitizePrefs(value: unknown): Prefs {
   if (typeof v.hoods === "boolean") out.hoods = v.hoods;
   if (typeof v.tilt === "boolean") out.tilt = v.tilt;
   if (typeof v.life === "boolean") out.life = v.life;
+  if (typeof v.restyle === "boolean") out.restyle = v.restyle;
   if (typeof v.tiltStrength === "number" && Number.isFinite(v.tiltStrength))
     out.tiltStrength = Math.min(100, Math.max(0, Math.round(v.tiltStrength)));
   if (v.theme === "system" || v.theme === "light" || v.theme === "dark") out.theme = v.theme;

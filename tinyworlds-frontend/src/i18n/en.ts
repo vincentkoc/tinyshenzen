@@ -29,6 +29,7 @@ export const en: Strings = {
     strength: "Strength",
     tiltStrengthLabel: "Miniature blur strength",
     life: "Life on the map",
+    restyle: "Pixel Singapore restyle",
     timeOfDay: "Time of day",
     themes: { system: "Auto", light: "Day", dark: "Dusk" },
     language: "Language",

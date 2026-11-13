@@ -27,4 +27,10 @@ describe("sanitizePrefs", () => {
     expect(sanitizePrefs({ lang: "es-ES" }).lang).toBe("es-ES");
     expect(sanitizePrefs({ lang: "auto" }).lang).toBe("auto");
   });
+
+  it("defaults the restyle layer on and keeps a stored choice", () => {
+    expect(DEFAULT_PREFS.restyle).toBe(true);
+    expect(sanitizePrefs({ restyle: false }).restyle).toBe(false);
+    expect(sanitizePrefs({ restyle: "yes" }).restyle).toBe(true);
+  });
 });

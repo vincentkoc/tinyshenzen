@@ -151,7 +151,7 @@ export class MapEngine {
   private readonly ctx: CanvasRenderingContext2D;
   private readonly mctx: CanvasRenderingContext2D;
   private readonly pyramid: Pyramid;
-  private readonly tileUrl: EngineOptions["tileUrl"];
+  private tileUrl: EngineOptions["tileUrl"];
   private readonly fileUrl: EngineOptions["fileUrl"];
 
   private view: ViewState = {
@@ -530,6 +530,19 @@ export class MapEngine {
   setLife(on: boolean): void {
     if (this.life === on) return;
     this.life = on;
+    this.invalidate();
+  }
+
+  /** Swap the tile pyramid (procedural vs restyle) and redraw from a cold cache. */
+  setTileUrl(tileUrl: EngineOptions["tileUrl"]): void {
+    this.tileUrl = tileUrl;
+    for (const tile of this.tiles.values()) {
+      tile.abort?.abort();
+      tile.bitmap?.close();
+    }
+    this.tiles.clear();
+    this.inflight = 0;
+    this.tries.clear();
     this.invalidate();
   }
 
