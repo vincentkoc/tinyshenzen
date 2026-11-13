@@ -162,21 +162,22 @@ python3 lora/water_constrain.py \
 # After slicing, a free --polish pass feathers the dark renderer fog at
 # the map edge into the viewer's beige (no stair-stepped border at low
 # zoom) and fills blocky or missing bay water from the land/water mask
-# with a tone-matched sample. --polish-edge then restores land the first
-# pass washed out or dropped, and fades the coverage edge with one
-# global distance field so the blend has no per-tile seams. Neither
-# pass calls an API; both are resume-safe.
+# with a tone-matched sample. --polish-vignette is the preferred free
+# edge pass: it reslices the edge from the source restyle windows (not
+# from already-faded tiles), keeps the bay-water fill and south-shore
+# land restore, builds one coarse coverage mask with morphological
+# cleanup, and applies a single noise-free vignette (~1–2 tiles) to
+# viewer beige. It is resume-safe and idempotent from source. Do not
+# run --polish immediately before it: the per-tile feather is what
+# made the quilted fade. --polish-edge is the earlier global-fade
+# attempt and is kept for the existing tests.
 # python3 lora/slice_frontend.py \
 #   --chunks /tmp/tinysz-core \
 #   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
 #   --district /tmp/tinysz-nanshan:/tmp/tinysz-nanshan-restyled/tiles-constrained \
 #   --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
 #   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
-#   --polish
-# python3 lora/slice_frontend.py \
-#   --chunks /tmp/tinysz-core \
-#   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
-#   --polish-edge
+#   --polish-vignette
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
