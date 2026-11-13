@@ -14,6 +14,7 @@ import { tinytkf } from "./tinytkf";
 import { tinyvlc } from "./tinyvlc";
 import { tinywesteros } from "./tinywesteros";
 import { tinysz } from "./tinysz";
+import { tinyszCore } from "./tinysz-core";
 import { tinywinterfell } from "./tinywinterfell";
 import type { World } from "./types";
 
@@ -25,6 +26,7 @@ export type { World, WorldCopy } from "./types";
  */
 export const WORLDS: Record<string, World> = {
   tinysz,
+  "tinysz-core": tinyszCore,
   tinynyc,
   tinyrao,
   tinyorl,
@@ -42,7 +44,7 @@ export const WORLDS: Record<string, World> = {
   tinykingslanding,
   tinywesteros,
 };
-export const DEFAULT_WORLD = "tinysz";
+export const DEFAULT_WORLD = "tinysz-core";
 
 /** Not a world: the build of the front page that lists them. */
 export const HOME = "home";

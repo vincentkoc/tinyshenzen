@@ -4,10 +4,10 @@ import { DEFAULT_WORLD, HOME, IS_HOME, resolveWorld, WORLD, WORLDS } from "..";
 
 describe("resolveWorld", () => {
   it("defaults to tinysz", () => {
-    expect(DEFAULT_WORLD).toBe("tinysz");
-    expect(resolveWorld(undefined).id).toBe("tinysz");
-    expect(resolveWorld("  ").id).toBe("tinysz");
-    expect(WORLD.id).toBe("tinysz");
+    expect(DEFAULT_WORLD).toBe("tinysz-core");
+    expect(resolveWorld(undefined).id).toBe("tinysz-core");
+    expect(resolveWorld("  ").id).toBe("tinysz-core");
+    expect(WORLD.id).toBe("tinysz-core");
   });
 
   it("picks a world by id", () => {
@@ -42,6 +42,7 @@ describe("resolveWorld", () => {
   it("lists the worlds in the order the front page shows them", () => {
     expect(Object.keys(WORLDS)).toEqual([
       "tinysz",
+      "tinysz-core",
       "tinynyc",
       "tinyrao",
       "tinyorl",
@@ -62,7 +63,7 @@ describe("resolveWorld", () => {
   });
 
   it("stops on an id it does not know, naming the ones it does", () => {
-    expect(() => resolveWorld("tinysp")).toThrow(/tinysp.*tinysz, tinynyc.*home/);
+    expect(() => resolveWorld("tinysp")).toThrow(/tinysp.*tinysz, tinysz-core, tinynyc.*home/);
   });
 
   it("keeps the front page apart: it is a build target, not a world", () => {

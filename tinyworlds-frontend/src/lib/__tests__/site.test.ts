@@ -21,7 +21,7 @@ import {
 
 describe("site", () => {
   it("is the default world unless the build says otherwise", () => {
-    expect(SITE_ID).toBe("tinysz");
+    expect(SITE_ID).toBe("tinysz-core");
     expect(SITE_NAME).toBe("tinysz");
     expect(HOME_URL).toBe("/");
   });
@@ -83,6 +83,7 @@ describe("site", () => {
   it("knows which places are already worlds, under every name a donor might type", () => {
     expect(BUILT_CITIES).toEqual([
       "Shenzhen",
+      "Shenzhen (Nanshan–Luohu)",
       "New York",
       "Nova York",
       "Nueva York",

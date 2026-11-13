@@ -114,9 +114,12 @@ export const hallCityUrl = (slug: string, hall = HALL_URL): string =>
 /** The front page's own share card (public/og/tinyworlds.jpg, made by the pipeline's `home-card`). */
 export const HOME_CARD_PATH = `${BASE_PATH}/og/tinyworlds.jpg`;
 
-/** The picture at the top of the front page: a slow lap over one world, and that lap's first frame. */
+/** The picture at the top of the front page: a slow lap over one world, and that lap's first frame.
+ * The showcase film keeps the short name (`hero.mp4`) of the first Shenzhen world, even though
+ * the map's default is now the three-district core.
+ */
 export const HERO = {
-  world: DEFAULT_WORLD,
+  world: "tinysz",
   loop: `${LOOPS_BASE}/hero.mp4`,
   still: `${LOOPS_BASE}/hero.jpg`,
 } as const;
