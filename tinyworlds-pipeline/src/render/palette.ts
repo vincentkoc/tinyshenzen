@@ -144,6 +144,27 @@ const RAMP_DEFS = {
   habboRoofBlue: "#3a7fd4",
   habboRoofYellow: "#f0c430",
   habboRoofTeal: "#2aa89a",
+  // ---- Pixel Singapore / naturalistic miniature (append only)
+  sgWater: "#2f6d58",
+  sgWaterDeep: "#24584a",
+  sgWaterShallow: "#3d8a70",
+  sgLawn: "#5d7a3c",
+  sgLawnLight: "#7a9a4e",
+  sgCanopy: "#4a6e38",
+  sgCanopyLit: "#7a9a4a",
+  sgAsphalt: "#7a776e",
+  sgConcrete: "#c8c2b6",
+  sgStone: "#b8b6b0",
+  sgGlassTeal: "#3a7a6c",
+  sgGlassBlue: "#4a7a92",
+  sgGlassDeep: "#2a4a58",
+  sgTerracotta: "#c4683c",
+  sgHdbCream: "#e2d4c0",
+  sgHdbPink: "#d4b8b0",
+  sgHdbBlue: "#a8b8c8",
+  sgHdbMint: "#b8c8b0",
+  sgRoofSand: "#e8d9a8",
+  sgRoofGreen: "#6a8a58",
 } as const;
 
 export type RampName = keyof typeof RAMP_DEFS;

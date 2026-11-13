@@ -104,6 +104,13 @@ export interface CityLook {
    * clean diamond ground tiles and toy-like palms. Turns off sky-glass gradients and canyon AO.
    */
   habbo?: boolean;
+  /**
+   * Pixel-Singapore-inspired look: muted naturalistic palette, teal-green water, lush rounded
+   * tree canopies, fine glass curtain walls with sky reflections, terracotta low roofs, pastel
+   * mid-rises, subtle (not ink) outlines. For tinysz this is the default; `habbo` remains an option.
+   * If both are set, `habbo` wins.
+   */
+  pixelsg?: boolean;
 }
 
 export interface City {

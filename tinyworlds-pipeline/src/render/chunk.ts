@@ -636,7 +636,7 @@ export class ChunkRenderer {
                         const pane = mix(seed ^ (bi * 131), fi) & 15;
                         const streak = (bi + fi * 2 + (seed & 63)) % 19;
                         // a diagonal streak of sky, a few bright panes, a few dark ones
-                        if (this.scene.look?.skyGlass) {
+                        if ((this.scene.look?.skyGlass || (this.scene.look?.pixelsg && !this.scene.look?.habbo))) {
                           const rise = vv / (wallH || 1);
                           if (pane === 1 || (rise < 0.22 && pane < 5)) colour = wallLo;
                           else if (streak < 4 + rise * 10 || pane === 0 || (rise > 0.68 && pane < 7))
@@ -876,7 +876,13 @@ export class ChunkRenderer {
     const { col, hb, obj, face, SW, gk, gh, wd, GW, gx0, gy0, sx0, sy0 } = this;
     const { fog, vol } = this.scene;
     const out = new Uint16Array(job.w * job.h);
-    const ctx: GroundContext = { gk, wd, GW, habbo: !!this.scene.look?.habbo };
+    const ctx: GroundContext = {
+      gk,
+      wd,
+      GW,
+      habbo: !!this.scene.look?.habbo,
+      pixelsg: !!this.scene.look?.pixelsg && !this.scene.look?.habbo,
+    };
     const habbo = !!this.scene.look?.habbo;
     const ink = idx(R.habboInk, S_OUTLINE);
     const fogSpan = fog.end - fog.start;

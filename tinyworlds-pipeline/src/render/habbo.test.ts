@@ -6,14 +6,11 @@ import { tinysz } from "../cities/tinysz.js";
 import { CITIES } from "../cities/index.js";
 
 describe("habbo look", () => {
-  it("is on for Shenzhen and off for every other city", () => {
-    expect(tinysz.look?.habbo).toBe(true);
-    for (const [id, city] of Object.entries(CITIES)) {
-      if (id === "tinysz" || id === "tinysz-full") {
-        expect(city.look?.habbo).toBe(true);
-      } else {
-        expect(city.look?.habbo).toBeFalsy();
-      }
+  it("is available but not the default Shenzhen look, and is off for every other city", () => {
+    expect(tinysz.look?.habbo).toBeFalsy();
+    expect(tinysz.look?.pixelsg).toBe(true);
+    for (const city of Object.values(CITIES)) {
+      expect(city.look?.habbo).toBeFalsy();
     }
   });
 

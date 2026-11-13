@@ -14,6 +14,8 @@ export interface GroundContext {
   GW: number;
   /** Clean diamond tiles, flat bright grass, no hash speckles. */
   habbo?: boolean;
+  /** Teal-green water, lush naturalistic grass, warm-grey pavement: Pixel Singapore ground. */
+  pixelsg?: boolean;
 }
 
 const NATURAL_BANK = new Set<number>([
@@ -161,8 +163,74 @@ export function habboGroundColor(ctx: GroundContext, kind: number, x: number, y:
   }
 }
 
+/**
+ * Pixel-Singapore ground: teal-green water, lush slightly varied lawns, warm-grey pavement,
+ * no diamond grout and no hash speckles.
+ */
+export function pixelsgGroundColor(ctx: GroundContext, kind: number, x: number, y: number, gi: number): number {
+  const a = x + 2 * y;
+  const b = x - 2 * y;
+  const patch = ((a >> 5) & 1) ^ ((b >> 5) & 1);
+  switch (kind) {
+    case G.Water:
+    case G.Lake:
+      return ctx.wd[gi] < 12 ? idx(R.sgWater, S_LIT) : idx(R.sgWaterDeep, S_LIT);
+    case G.Pool:
+      return idx(R.pool, S_LIT);
+    case G.Park:
+    case G.Garden:
+    case G.Cemetery:
+    case G.Meadow:
+      return idx(R.sgLawn, S_LIT);
+    case G.Lawn:
+    case G.Fairway:
+    case G.GolfGreen:
+      return idx(R.sgLawnLight, S_LIT);
+    case G.Forest:
+    case G.Scrub:
+    case G.Wetland:
+      return idx(R.sgCanopy, S_LIT);
+    case G.Road:
+    case G.RoadMajor:
+    case G.Highway:
+    case G.Service:
+    case G.DirtRoad:
+      return idx(R.sgAsphalt, kind === G.Highway || kind === G.RoadMajor ? S_SHADE : S_HALF);
+    case G.Rail:
+      return idx(R.sgAsphalt, S_SHADE);
+    case G.Sand:
+      return idx(R.sand, S_LIT);
+    case G.Parking:
+    case G.Apron:
+    case G.Construction:
+    case G.Industrial:
+    case G.Railyard:
+      return idx(R.sgConcrete, S_HALF);
+    case G.Plaza:
+    case G.Path:
+    case G.Pier:
+    case G.Cobble:
+    case G.Residential:
+    case G.Playground:
+    case G.Land:
+      return idx(R.sgConcrete, S_LIT);
+    case G.Court:
+      return idx(R.court, S_LIT);
+    case G.CourtGreen:
+      return idx(R.sgLawn, S_LIT);
+    case G.Track:
+      return idx(R.track, S_LIT);
+    case G.Runway:
+    case G.Taxiway:
+      return idx(R.sgAsphalt, S_HALF);
+    default:
+      return idx(R.sgConcrete, S_LIT);
+  }
+}
+
 export function groundColor(ctx: GroundContext, kind: number, x: number, y: number, gi: number): number {
   if (ctx.habbo) return habboGroundColor(ctx, kind, x, y, gi);
+  if (ctx.pixelsg) return pixelsgGroundColor(ctx, kind, x, y, gi);
   const h = hash2(x, y);
   const a = x + 2 * y; // constant along streets
   const b = x - 2 * y; // constant along avenues

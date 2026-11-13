@@ -714,7 +714,76 @@ export const SIERRA: StyleProfile = {
 };
 
 /** Shenzhen: glass curtain-wall supertalls, white and pastel mid-rises, dense concrete urban villages, tropical greenery. */
+/** Naturalistic Pixel-Singapore-inspired materials: muted concrete, teal glass, terracotta shophouse roofs, pastel mid-rises. */
 export const SHENZHEN: StyleProfile = {
+  rowWalls: [
+    R.sgHdbCream,
+    R.sgConcrete,
+    R.sgHdbPink,
+    R.sgHdbMint,
+    R.cream,
+    R.whiteBrick,
+    R.tan,
+    R.salmon,
+    R.rose,
+  ],
+  midWalls: [
+    R.sgHdbCream,
+    R.sgHdbCream,
+    R.whiteBrick,
+    R.sgHdbBlue,
+    R.sgHdbMint,
+    R.sgHdbPink,
+    R.cream,
+    R.limestone,
+    R.sgConcrete,
+    R.sgStone,
+  ],
+  slabWalls: [R.whiteBrick, R.sgHdbCream, R.sgConcrete, R.sgHdbBlue, R.limestone, R.sgStone],
+  houseWalls: [
+    R.sgHdbCream,
+    R.cream,
+    R.whiteBrick,
+    R.tan,
+    R.sgHdbPink,
+    R.salmon,
+    R.rose,
+    R.sgHdbMint,
+  ],
+  houseRoofs: [R.sgTerracotta, R.roofTerracotta, R.roofClay, R.roofRed, R.sgRoofSand, R.roofBrown],
+  houseMaxArea: 220,
+  flatRoofs: [R.roofWhite, R.roofSilver, R.roofGravel, R.sgRoofGreen, R.roofTar, R.sgConcrete],
+  lowRoofs: [R.sgTerracotta, R.roofTerracotta, R.roofClay, R.roofWhite, R.sgRoofSand, R.sgRoofGreen],
+  lowPitched: 0.22,
+  towerRoofs: [R.roofWhite, R.roofSilver, R.roofGravel, R.sgRoofGreen],
+  glass: [
+    R.sgGlassTeal,
+    R.sgGlassTeal,
+    R.sgGlassBlue,
+    R.glassTeal,
+    R.glassCyan,
+    R.glassBlue,
+    R.glassSky,
+    R.sgGlassDeep,
+    R.glassGreen,
+    R.glassDark,
+  ],
+  stoneTowers: [R.whiteBrick, R.sgHdbCream, R.sgConcrete, R.sgStone, R.limestone, R.sgHdbBlue],
+  industrialWalls: [R.sgConcrete, R.sgStone, R.steel, R.greyStone, R.whiteBrick],
+  industrialRoofs: [R.roofSilver, R.roofWhite, R.roofTar, R.roofGravel],
+  civicWalls: [R.whiteBrick, R.sgHdbCream, R.limestone, R.sgHdbBlue, R.sgConcrete],
+  sacredWalls: [R.sgTerracotta, R.sgHdbCream, R.yellowBrick, R.whiteBrick, R.tan, R.ochre],
+  sacredRoofs: [R.sgTerracotta, R.roofTerracotta, R.roofClay, R.roofRed, R.roofCopper],
+  outbuildingWalls: [R.sgConcrete, R.sgHdbCream, R.whiteBrick, R.sgStone],
+  outbuildingRoofs: [R.roofGravel, R.roofWhite, R.sgTerracotta, R.roofTar],
+  windows: [R.glassDark, R.glassBlack, R.sgGlassDeep, R.glassBlue],
+  // more curtain glass on towers (Raffles-Place manner); mid-rises stay punched pastel masonry
+  mid: [0.28, 0.48],
+  high: [0.72, 0.14],
+  superTall: 0.9,
+};
+
+export const SHENZHEN_HABBO: StyleProfile = {
   // Habbo-bright village blocks: cream, coral, sand and mint, packed tight
   rowWalls: [
     R.habboCream,

@@ -35,9 +35,8 @@ describe("tinysz", () => {
     expect(tinyszFull.style).toBe(SHENZHEN);
     expect(tinysz.landmarks["ping an finance centre"]?.pattern).toBeDefined();
     expect(tinysz.heightFixes?.["ping an finance centre"]).toBe(599.1);
-    expect(tinysz.look?.habbo).toBe(true);
-    expect(tinysz.look?.skyGlass).toBeFalsy();
-    expect(tinysz.look?.canyonAO).toBeFalsy();
+    expect(tinysz.look?.pixelsg).toBe(true);
+    expect(tinysz.look?.habbo).toBeFalsy();
     expect(tinysz.look?.palms).toBe(true);
     expect(tinysz.look?.roofFurniture).toBe(true);
     expect(tinysz.flora).toBe("tropical");
