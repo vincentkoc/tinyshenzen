@@ -62,6 +62,24 @@ python3 lora/restyle_map.py \
 ```
 
 `restyle_map.py` checkpoints every window and can be re-run safely.
+`--quality medium` (or `low` / `high`) is passed through to the OpenAI Images API.
+`--count-only` walks the windows, skips the API, and writes how many are fog
+(those are not billed). To speed a large box, split the work across N workers
+that share one `--out` directory; each `--shard I/N` (0-based) is a disjoint
+slice, appends `usage.jsonl` under a file lock, and leaves the stitch to a
+final `--stitch-only` pass:
+
+```bash
+node --max-old-space-size=4096 lora/render_full.mjs \
+  --city tinysz-nanshan --out /workspace/tinysz-nanshan
+python3 lora/restyle_map.py --chunks /workspace/tinysz-nanshan \
+  --out /workspace/tinysz-nanshan-restyled --quality medium --shard 0/8
+# …shards 1/8 through 7/8, same --out…
+python3 lora/restyle_map.py --chunks /workspace/tinysz-nanshan \
+  --out /workspace/tinysz-nanshan-restyled --stitch-only
+```
+
+`--windows x,y;x,y` restyles an explicit list of window origins instead.
 
 The restyle can invent rivers on pale land (and sometimes pave over real
 water). `render_water_mask.mjs` paints the scene's ground kinds the same way
@@ -176,8 +194,8 @@ Rough time and cost, 24 GB card, musubi-tuner fp8 + block swap (slower than a
 | `prepare_dataset.py` | Pairs → musubi-tuner `images/` + `controls/` + `dataset.toml`. |
 | `train.sh` | Cache latents, cache text encoder, train the LoRA. |
 | `infer_multidiffusion.py` | Tiled LoRA inference and hem stitch. |
-| `render_full.mjs` | Chunked procedural Futian render. |
-| `restyle_map.py` | OpenAI tiled restyle of that render (resume-safe). |
+| `render_full.mjs` | Chunked procedural render (`--city` selects tinysz, tinysz-nanshan, tinysz-luohu, …). |
+| `restyle_map.py` | OpenAI tiled restyle of that render (resume-safe, `--quality`, `--shard I/N`, `--windows`, `--count-only`). |
 | `render_water_mask.mjs` | Rasterize real water/land from the scene's ground kinds. |
 | `water_constrain.py` | Feathered composite that undoes invented (or missing) water. |
 | `slice_frontend.py` | Cut the stitch into the viewer's 512-px webp pyramid. |

@@ -18,6 +18,9 @@ model if you provide a key (see below).
 | --- | --- |
 | `tinysz` (default) | A roughly two-kilometre box around the Civic Center (22.5455° N, 114.0683° E), including Ping An Finance Centre and Lianhuashan Park. Use this first: it fetches and renders quickly. |
 | `tinysz-full` | The urban core: Futian, Nanshan, Luohu and neighbouring districts (lat 22.45–22.75, lon 113.80–114.30). This is a large extract; expect a long download and render. |
+| `tinysz-nanshan` | Nanshan core: Shekou, Houhai, the Science Park and OCT (lon 113.90–114.048, lat 22.47–22.564). Contiguous with the Futian test box on the east. |
+| `tinysz-luohu` | Luohu core: Caiwuwei, Dongmen and Luohu Port (lon 114.088–114.14, lat 22.522–22.564). Contiguous with the Futian test box on the west. |
+| `tinysz-core` | The three cores as one contiguous strip (Nanshan–Futian–Luohu). |
 
 The default style (`SHENZHEN` in `tinyworlds-pipeline/src/scene/styles.ts`) is a city-gated
 Pixel-Singapore-inspired look (`look.pixelsg`): muted warm-grey and beige concrete, teal and
@@ -116,6 +119,17 @@ python3 lora/restyle_map.py \
   --out /tmp/tinysz-futian-restyled \
   --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
   --full /tmp/tinyshenzen-futian-restyled.png
+
+# For a larger box (tinysz-nanshan, tinysz-luohu), render with
+#   node --max-old-space-size=4096 lora/render_full.mjs --city tinysz-nanshan --out /tmp/tinysz-nanshan
+# then restyle at --quality medium, optionally sharded across workers that share
+# one --out directory. Each shard is resume-safe and only writes its own windows:
+#   python3 lora/restyle_map.py --chunks /tmp/tinysz-nanshan --out /tmp/tinysz-nanshan-restyled \
+#     --quality medium --shard 0/8 --concurrency 4
+#   python3 lora/restyle_map.py --chunks /tmp/tinysz-nanshan --out /tmp/tinysz-nanshan-restyled --stitch-only
+# `--count-only` reports non-fog windows (the ones that would be billed) with no API calls.
+# `--windows x,y;x,y` restyles an explicit list. The pipeline CLI also accepts
+# `--quality medium` on a single image: `npm run cli -- restyle --in p.png --look pixelsg --quality medium`.
 
 # 3. land/water constraint (free): composite procedural pixels back wherever
 #    the restyle invented water on land, or paved over real water. Open land
