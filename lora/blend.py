@@ -46,7 +46,7 @@ def stitch_bands(
     preview_path: Path | None = None,
     preview_max_width: int = 4096,
     missing: str = "skip",
-) -> Image.Image:
+) -> Image.Image | None:
     """Blend every tile into a full RGB image. Writes PNG/JPEG when paths are given."""
     step = max(1, (tiles[0].h - overlap) if tiles else height)
     raw_path = (out_path.with_suffix(".rgb") if out_path else Path("/tmp/stitch.rgb"))
@@ -83,20 +83,72 @@ def stitch_bands(
         print(f"  stitch rows {y0}–{y1} / {height}", flush=True)
 
     mm.flush()
-    im = Image.fromarray(np.asarray(mm), "RGB")
-    if out_path is not None:
-        im.save(out_path, "PNG", compress_level=4)
-        print(f"  wrote {out_path} {width}×{height}", flush=True)
+    result: Image.Image | None = None
     if preview_path is not None:
-        pw = min(preview_max_width, width)
-        ph = max(1, round(height * (pw / width)))
-        prev = im.resize((pw, ph), Image.Resampling.LANCZOS)
-        preview_path.parent.mkdir(parents=True, exist_ok=True)
-        prev.convert("RGB").save(preview_path, "JPEG", quality=90, optimize=True)
-        print(f"  preview {preview_path} {pw}×{ph}", flush=True)
+        write_preview_from_mm(mm, preview_path, preview_max_width)
+    if out_path is not None:
+        write_full_from_mm(mm, out_path)
+        print(f"  wrote {out_path} {width}×{height}", flush=True)
+    if out_path is None and preview_path is None:
+        # Tests and other in-memory callers still get a PIL image. A full-city
+        # stitch always passes --out or --preview and never holds this copy.
+        result = Image.fromarray(np.asarray(mm), "RGB")
     del mm
     try:
         raw_path.unlink(missing_ok=True)
     except OSError:
         pass
-    return im
+    return result
+
+
+def write_preview_from_mm(mm: np.memmap, preview_path: Path, max_width: int = 4096) -> tuple[int, int]:
+    """Downsample a full-canvas memmap in horizontal strips so a 60k-wide city
+    does not need a second multi-gigabyte RGB copy just for the JPEG preview."""
+    height, width, _ = mm.shape
+    pw = min(max_width, int(width))
+    ph = max(1, round(height * (pw / width)))
+    prev = Image.new("RGB", (pw, ph))
+    band = 768
+    for y0 in range(0, height, band):
+        y1 = min(height, y0 + band)
+        dy0 = int(y0 * ph / height)
+        dy1 = max(dy0 + 1, int(y1 * ph / height))
+        strip = Image.fromarray(np.asarray(mm[y0:y1]), "RGB")
+        prev.paste(strip.resize((pw, dy1 - dy0), Image.Resampling.LANCZOS), (0, dy0))
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    prev.convert("RGB").save(preview_path, "JPEG", quality=90, optimize=True)
+    print(f"  preview {preview_path} {pw}×{ph}", flush=True)
+    return pw, ph
+
+
+def write_full_from_mm(mm: np.memmap, out_path: Path) -> None:
+    """Write the full canvas. Prefer ffmpeg so we do not hold a second 5+ GB
+    PIL copy next to the memmap; fall back to Pillow if ffmpeg is missing."""
+    import shutil
+    import subprocess
+
+    height, width, _ = mm.shape
+    mm.flush()
+    if out_path.suffix.lower() == ".png" and shutil.which("ffmpeg"):
+        raw_path = Path(str(mm.filename))
+        proc = subprocess.run(
+            [
+                "ffmpeg", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
+                "-s", f"{width}x{height}", "-i", str(raw_path),
+                "-frames:v", "1", "-f", "image2",
+                str(out_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        if proc.returncode == 0 and out_path.exists() and out_path.stat().st_size > 1000:
+            return
+        print(f"  ffmpeg png failed (exit {proc.returncode}); falling back to Pillow", flush=True)
+    im = Image.fromarray(np.asarray(mm), "RGB")
+    suffix = out_path.suffix.lower()
+    if suffix in {".jpg", ".jpeg"}:
+        im.save(out_path, "JPEG", quality=90, optimize=True)
+    else:
+        im.save(out_path, "PNG", compress_level=4)
+    del im
