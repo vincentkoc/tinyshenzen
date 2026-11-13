@@ -14,6 +14,7 @@ from PIL import Image
 import blend
 import restyle_map
 import prepare_dataset
+import water_constrain as W
 import tiles as T
 from tiles import Tile
 
@@ -126,6 +127,113 @@ class FogSkipTest(unittest.TestCase):
         # right (bright) takes the restyle
         r = out.getpixel((56, 32))
         self.assertGreater(r[1], 200, r)
+
+
+
+class WaterConstrainTest(unittest.TestCase):
+    def _rgb(self, w, h, color):
+        return Image.new("RGB", (w, h), color)
+
+    def test_false_water_on_land_is_replaced_by_procedural(self):
+        # beige land in the renderer, invented teal in the restyle
+        proc = self._rgb(64, 64, (0xE0, 0xD8, 0xC8))
+        rest = self._rgb(64, 64, (0x2F, 0x6D, 0x58))
+        mask = Image.new("L", (64, 64), 0)  # land
+        out, report = W.constrain(proc, rest, mask, feather=1)
+        self.assertGreater(report["false_water"], 64 * 64 * 0.9)
+        self.assertEqual(report["missing_water"], 0)
+        px = out.getpixel((32, 32))
+        self.assertGreater(px[0], 200, px)  # back to beige (0xE0, 0xD8, 0xC8), not teal
+        self.assertGreater(px[0], px[1] - 10, px)
+        self.assertGreater(abs(px[0] - 0xE0) < 16 or px[0] >= 200, 0)
+        self.assertEqual(px, (0xE0, 0xD8, 0xC8))
+
+    def test_missing_water_is_restored_from_procedural(self):
+        proc = self._rgb(64, 64, (0x2F, 0x6D, 0x58))
+        rest = self._rgb(64, 64, (0xE0, 0xD8, 0xC8))  # paved over
+        mask = Image.new("L", (64, 64), 255)  # water kind
+        out, report = W.constrain(proc, rest, mask, feather=1)
+        self.assertGreater(report["missing_water"], 64 * 64 * 0.9)
+        px = out.getpixel((32, 32))
+        self.assertLess(px[0], 80, px)
+        self.assertGreater(px[1], 80, px)
+
+    def test_matching_water_and_land_are_left_alone(self):
+        water = self._rgb(32, 32, (0x2F, 0x6D, 0x58))
+        land = self._rgb(32, 32, (0xE0, 0xD8, 0xC8))
+        mask_w = Image.new("L", (32, 32), 255)
+        mask_l = Image.new("L", (32, 32), 0)
+        out_w, r_w = W.constrain(water, water, mask_w, feather=1)
+        out_l, r_l = W.constrain(land, land, mask_l, feather=1)
+        self.assertEqual(r_w["fixed"], 0)
+        self.assertEqual(r_l["fixed"], 0)
+        self.assertEqual(out_w.getpixel((16, 16)), (0x2F, 0x6D, 0x58))
+        self.assertEqual(out_l.getpixel((16, 16)), (0xE0, 0xD8, 0xC8))
+
+    def test_default_water_under_fog_is_not_forced(self):
+        # unpainted kind is water, but the procedural image is dark fog
+        proc = self._rgb(64, 64, (8, 8, 10))
+        rest = self._rgb(64, 64, (8, 8, 10))
+        mask = Image.new("L", (64, 64), 255)
+        _out, report = W.constrain(proc, rest, mask, feather=1)
+        self.assertEqual(report["gt_water"], 0)
+        self.assertEqual(report["fixed"], 0)
+
+    def test_window_grid_glass_is_not_treated_as_water(self):
+        # Glass is teal in BOTH the procedural image and the restyle (as on the
+        # real map). The constrain step must not replace it with "land".
+        def glass():
+            im = Image.new("RGB", (64, 64), (0x3A, 0x7A, 0x6C))
+            px = im.load()
+            for y in range(64):
+                for x in range(64):
+                    if x % 4 == 0 or y % 4 == 0:
+                        px[x, y] = (0xD0, 0xE0, 0xE8)
+            return im
+        proc, rest = glass(), glass()
+        mask = Image.new("L", (64, 64), 0)
+        out, report = W.constrain(proc, rest, mask, feather=1)
+        self.assertEqual(report["false_water"], 0, report)
+        cell = out.getpixel((6, 6))
+        self.assertEqual(cell, (0x3A, 0x7A, 0x6C))
+
+    def test_textured_invented_water_on_land_is_replaced(self):
+        # Restyle water often has a pixel-art wash (high local edge). It must
+        # still come off where the procedural image is beige land.
+        proc = self._rgb(80, 80, (0xE0, 0xD8, 0xC8))
+        rest = Image.new("RGB", (80, 80), (0x2F, 0x6D, 0x58))
+        px = rest.load()
+        for y in range(80):
+            for x in range(80):
+                if (x + y) % 3 == 0:
+                    px[x, y] = (0x3D, 0x8A, 0x70)
+                elif (x + 2 * y) % 5 == 0:
+                    px[x, y] = (0x24, 0x58, 0x4A)
+        mask = Image.new("L", (80, 80), 0)
+        out, report = W.constrain(proc, rest, mask, feather=1)
+        self.assertGreater(report["false_water"], 80 * 80 * 0.7, report)
+        pxo = out.getpixel((40, 40))
+        self.assertEqual(pxo, (0xE0, 0xD8, 0xC8))
+
+    def test_feather_blends_at_the_edge(self):
+        proc = self._rgb(80, 80, (0xE0, 0xD8, 0xC8))
+        rest = self._rgb(80, 80, (0xC0, 0xB0, 0x90))  # restyle land, slightly different
+        # invented water only on the left half
+        for y in range(80):
+            for x in range(40):
+                rest.putpixel((x, y), (0x2F, 0x6D, 0x58))
+        mask = Image.new("L", (80, 80), 0)
+        out, report = W.constrain(proc, rest, mask, feather=12)
+        self.assertGreater(report["false_water"], 30 * 80)
+        left = out.getpixel((8, 40))
+        right = out.getpixel((70, 40))
+        edge = out.getpixel((40, 40))
+        self.assertGreater(left[0], 150, left)
+        self.assertEqual(right, (0xC0, 0xB0, 0x90))
+        # the seam is a mix, not a hard cut
+        self.assertNotEqual(edge, left)
+        self.assertNotEqual(edge, right)
+
 
 
 if __name__ == "__main__":

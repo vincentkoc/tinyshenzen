@@ -63,6 +63,23 @@ python3 lora/restyle_map.py \
 
 `restyle_map.py` checkpoints every window and can be re-run safely.
 
+The restyle can invent rivers on pale land (and sometimes pave over real
+water). `render_water_mask.mjs` paints the scene's ground kinds the same way
+the chunk renderer does, and `water_constrain.py` composites the procedural
+pixels back — with a feathered edge — wherever the restyle shows water on
+land, or land on real water. Glass is left alone because it is already teal
+in the procedural image. This is free: it does not call the API.
+
+```bash
+node --max-old-space-size=4096 lora/render_water_mask.mjs \
+  --out /workspace/tinysz-futian/water_mask.png
+python3 lora/water_constrain.py \
+  --mask /workspace/tinysz-futian/water_mask.png \
+  --preview /workspace/tinyshenzen-futian-restyled-preview.jpg \
+  --full /workspace/tinyshenzen-futian-restyled.png
+```
+
+
 ## Phase 2 — dataset, train, MultiDiffusion
 
 ```bash
@@ -139,5 +156,7 @@ Rough time and cost, 24 GB card, musubi-tuner fp8 + block swap (slower than a
 | `infer_multidiffusion.py` | Tiled LoRA inference and hem stitch. |
 | `render_full.mjs` | Chunked procedural Futian render. |
 | `restyle_map.py` | OpenAI tiled restyle of that render (resume-safe). |
+| `render_water_mask.mjs` | Rasterize real water/land from the scene's ground kinds. |
+| `water_constrain.py` | Feathered composite that undoes invented (or missing) water. |
 | `tiles.py`, `blend.py` | Shared window grid and hem. |
 | `test_tiles.py` | CPU unit tests. |
