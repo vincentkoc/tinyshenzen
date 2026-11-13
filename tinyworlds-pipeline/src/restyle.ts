@@ -28,6 +28,25 @@ export const HABBO_PROMPT =
   "Cute chunky palm trees with dark outlines. Bright clean parks. " +
   "Preserve landmark identities and relative heights. Stay isometric pixel art, not photorealistic, not 3D CGI.";
 
+/**
+ * Pixel-Singapore-inspired finish: a fine, naturalistic isometric miniature.
+ * Describes the style in words only — never send a third-party image as a style reference.
+ */
+export const PIXELSG_PROMPT =
+  "Redraw this isometric city view as detailed isometric pixel art in a fine naturalistic miniature style. " +
+  "Keep the exact camera, 2:1 dimetric projection, building footprints, heights, roof shapes, street layout, parks, water and skyline. " +
+  "Do not add, remove, merge, split or move any building, road or landmark. Do not invent text, signs or new structures. " +
+  "No cartoon black outlines and no Habbo-style chunky cel-shading: edges come from value contrast only. " +
+  "Natural daylight from the upper left, soft cool shadows, verticals stay vertical, no vanishing point. " +
+  "Muted warm-grey and beige concrete towers; teal-green and sky-blue glass curtain walls with sky reflections and very fine window grids. " +
+  "Pastel mid-rises in cream, pale pink and pale blue, with regular punched windows and rooftop plant. " +
+  "Low buildings with terracotta tiled pitched roofs. Occasional green roofs, pools and pale helipads. " +
+  "Lush tropical parks: dense rounded individual tree crowns in many greens, some palms, slightly varied lawn. " +
+  "Teal-green water, slightly textured, even in colour, with a clean shoreline. " +
+  "Grey asphalt roads with yellow and white lane markings and a few small cars and buses. " +
+  "Stay fine-scale isometric pixel art — a tilt-shift miniature, not chunky toy pixels, not photorealistic 3D, not a painterly canvas. " +
+  "Preserve landmark identities and relative heights. Consistent pixel scale across the frame.";
+
 /** Current best OpenAI image-edit model (gpt-image-1 was shut down 23 Oct 2026). Sunburst is the editing-precision line; 2.6 is the latest. */
 export const DEFAULT_OPENAI_MODEL = "gpt-image-2.6-sunburst";
 export const DEFAULT_OPENAI_QUALITY = "high";
@@ -209,8 +228,8 @@ export interface RestyleOpts {
   window?: number;
   overlap?: number;
   prompt?: string;
-  /** When "habbo", use HABBO_PROMPT unless `prompt` is set. */
-  look?: "habbo";
+  /** Named prompt: "habbo" or "pixelsg", unless `prompt` is set. */
+  look?: "habbo" | "pixelsg";
   /** Injected in tests: (png bytes) => restyled png bytes. */
   paint?: (png: Buffer) => Promise<Buffer>;
   log?: (msg: string) => void;
@@ -301,7 +320,9 @@ async function paintOpenAI(
 export async function restyleImage(opts: RestyleOpts): Promise<void> {
   const window = opts.window ?? DEFAULT_WINDOW;
   const overlap = opts.overlap ?? DEFAULT_OVERLAP;
-  const prompt = opts.prompt ?? (opts.look === "habbo" ? HABBO_PROMPT : DEFAULT_PROMPT);
+  const prompt =
+    opts.prompt ??
+    (opts.look === "habbo" ? HABBO_PROMPT : opts.look === "pixelsg" ? PIXELSG_PROMPT : DEFAULT_PROMPT);
   const log = opts.log ?? console.log;
   let paint = opts.paint;
   if (!paint) {

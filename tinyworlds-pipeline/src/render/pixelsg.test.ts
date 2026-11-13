@@ -4,6 +4,7 @@ import { tinysz, tinyszFull } from "../cities/tinysz.js";
 import { SHENZHEN, SHENZHEN_HABBO } from "../scene/styles.js";
 import { G } from "../scene/kinds.js";
 import { idx, R, S_LIT } from "./palette.js";
+import { PIXELSG_PROMPT } from "../restyle.js";
 import { pixelsgGroundColor, type GroundContext } from "./ground.js";
 
 describe("pixelsg look", () => {
@@ -33,4 +34,10 @@ describe("pixelsg look", () => {
     expect(park).toBe(idx(R.sgLawn, S_LIT));
   });
 
+  it("describes a Pixel-Singapore-inspired restyle without asking for a third-party image", () => {
+    expect(PIXELSG_PROMPT).toMatch(/detailed isometric pixel art/i);
+    expect(PIXELSG_PROMPT).toMatch(/teal/i);
+    expect(PIXELSG_PROMPT).toMatch(/terracotta/i);
+    expect(PIXELSG_PROMPT.toLowerCase()).not.toMatch(/yadong|upload this image|style reference image/);
+  });
 });
