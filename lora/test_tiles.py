@@ -964,5 +964,212 @@ class OverviewFromZ0Test(unittest.TestCase):
 
 
 
+class VignettePolishTest(unittest.TestCase):
+    """--polish-vignette rebuilds the edge from source, never from dest."""
+
+    PAD = (0x1A, 0x1E, 0x1C)
+    GREEN = (40, 130, 70)
+    GRAY = (160, 160, 155)
+    WATER = (0x2F, 0x6D, 0x58)
+
+    def _district(self, root: Path, width=1024, height=512, rgb=None):
+        from tiles import Tile
+        tiles_dir = root / "windows"
+        tiles_dir.mkdir(parents=True, exist_ok=True)
+        img = rgb if rgb is not None else np.full((height, width, 3), self.GREEN, dtype=np.uint8)
+        Image.fromarray(img, "RGB").save(tiles_dir / "0_0.png")
+        return {
+            "tiles": tiles_dir,
+            "windows": [Tile(0, 0, width, height)],
+            "origin": (0, 0),
+            "width": width,
+            "height": height,
+        }
+
+    def test_reslice_skips_dark_fog_and_washed_halo(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            src = np.full((512, 512, 3), self.GREEN, dtype=np.uint8)
+            src[:80, :] = self.PAD            # renderer dark fog
+            src[80:120, :] = self.GRAY        # desaturated halo
+            src[120:140, :] = SF.VIEW_FOG     # unpainted beige
+            d = self._district(root, width=512, height=512, rgb=src)
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 2}
+            out = SF.reslice_z0_from_source([d], grid, 0, 0, pad_rgb=self.PAD)
+            self.assertIsNotNone(out)
+            # city is kept
+            self.assertTrue(np.allclose(out[200, 200], self.GREEN, atol=2))
+            # dark fog, halo and beige were not pasted — canvas stays viewer fog
+            for y in (20, 100, 130):
+                self.assertTrue(
+                    np.allclose(out[y, 256], SF.VIEW_FOG, atol=2),
+                    f"y={y} got {out[y, 256].tolist()}",
+                )
+            # no dark pad anywhere
+            lum = out.astype(np.float32).mean(axis=2)
+            self.assertFalse(np.any((lum < 40) & (np.abs(out.astype(int) - self.GREEN).sum(2) > 30)))
+
+    def test_prepare_clean_fills_water_and_land_and_does_not_blur(self):
+        rest = np.full((512, 512, 3), SF.VIEW_FOG, dtype=np.uint8)
+        # a sharp green half is already good restyle — must stay sharp
+        rest[256:, :] = self.GREEN
+        # a beige hole in the green that procedural can fill
+        rest[300:340, 200:240] = SF.VIEW_FOG
+        proc = np.full((512, 512, 3), self.PAD, dtype=np.uint8)
+        proc[256:, :] = self.GREEN
+        proc[40:120, 40:200] = self.WATER  # water in the empty half
+        mask = np.zeros((512, 512), dtype=np.uint8)
+        mask[40:120, 40:200] = 255
+        out, n_water, n_land = SF.prepare_clean_tile(
+            rest, proc, mask, pad_rgb=self.PAD, origin=(0, 0),
+        )
+        self.assertIsNotNone(out)
+        self.assertGreater(n_water, 100)
+        self.assertGreater(n_land, 100)
+        # hole is now land, not beige
+        hole = out[310:330, 210:230]
+        self.assertGreater(int(hole[:, :, 1].mean()), 80)
+        self.assertFalse(np.all(np.abs(hole.astype(int) - SF.VIEW_FOG) <= 6))
+        # water landed in the empty half
+        self.assertGreater(int(out[80, 100, 1]), 40)
+        # the sharp green/beige edge at y=256 was not Gaussian-feathered
+        # (a first-polish-style blur would smear 48 px). A few px of
+        # restore feather is allowed; a 48-px smear is not.
+        above = out[240:250, 256]
+        # still essentially beige (not a mid-blend green-gray)
+        dist = np.abs(above.astype(int) - SF.VIEW_FOG).mean()
+        self.assertLess(float(dist), 20, dist)
+
+    def test_smooth_coverage_drops_islands_and_rounds_a_tile_step(self):
+        # Coarse 64×64 field. A solid block plus a 2-cell island, and a
+        # 16-cell-wide stair (one z0 tile at scale 16 is 32 coarse cells;
+        # a smaller stair still shows the closing).
+        acc = np.zeros((64, 64), dtype=np.float32)
+        acc[8:48, 8:40] = 1.0
+        acc[24:48, 40:50] = 1.0   # 10-cell-wide stair; close_r=8 fills it
+        acc[2:4, 2:4] = 1.0       # isolated island
+        mask = SF.smooth_coverage_mask(acc, threshold=0.4, blur=2, open_r=3, close_r=8)
+        # island is gone
+        self.assertFalse(bool(mask[2:4, 2:4].any()), "island should be opened away")
+        # the inside corner of the stair is filled (closing + blur)
+        self.assertTrue(bool(mask[14:22, 40:48].mean() > 0.4), "stair notch should close")
+        # we did not fill the whole exterior
+        self.assertLess(float(mask.mean()), 0.8)
+
+    def test_vignette_fade_is_a_smooth_wide_falloff(self):
+        # A vertical half-plane of content at x < 200, fade=128, inset=16.
+        arr = np.full((512, 512, 3), self.GREEN, dtype=np.uint8)
+        # signed dist: negative inside (left), 0 at x=200
+        yy, xx = np.mgrid[0:512, 0:512]
+        dist = (xx - 200).astype(np.float32)
+        out, status = SF.apply_coverage_fade(arr, dist, fade=128, inset=16, pad_rgb=self.PAD)
+        self.assertEqual(status, "changed")
+        self.assertIsNotNone(out)
+        # deep inside (x=40) is still green
+        self.assertTrue(np.allclose(out[256, 40], self.GREEN, atol=4))
+        # past the fade (x=200+128+10) is viewer beige
+        self.assertTrue(np.allclose(out[256, 350], SF.VIEW_FOG, atol=4))
+        # the falloff itself is monotonic and has no 512-aligned jump
+        row = out[256, 200:328].astype(np.float32)
+        greenness = row[:, 1]
+        diffs = np.diff(greenness)
+        # fading toward beige (lower green) — allow tiny numeric wobble
+        self.assertLess(float(diffs.max()), 2.5)
+        self.assertLess(float(np.abs(diffs).max()), 8.0)
+
+    def test_polish_vignette_ignores_quilted_dest_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Source: green half-plane (y >= 200), dark fog above — two tiles wide.
+            src = np.full((512, 1024, 3), self.PAD, dtype=np.uint8)
+            src[200:, :] = self.GREEN
+            d = self._district(root, width=1024, height=512, rgb=src)
+            restyle = root / "restyle"
+            proc = root / "proc"
+            clean = root / "clean"
+            (restyle / "0").mkdir(parents=True)
+            (proc / "0").mkdir(parents=True)
+            # Dest is "quilted": mid-gray rounded blobs, the bug we must not read.
+            for tx in (0, 1):
+                quilt = np.full((512, 512, 3), SF.VIEW_FOG, dtype=np.uint8)
+                yy, xx = np.mgrid[0:512, 0:512]
+                blob = ((xx - 256) ** 2 + (yy - 256) ** 2) < 180 ** 2
+                quilt[blob] = self.GRAY
+                Image.fromarray(quilt, "RGB").save(restyle / "0" / f"{tx}_0.webp", "WEBP")
+                # procedural agrees with the source half-plane
+                pimg = np.full((512, 512, 3), self.PAD, dtype=np.uint8)
+                pimg[200:, :] = self.GREEN
+                Image.fromarray(pimg, "RGB").save(proc / "0" / f"{tx}_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 2}
+            present = SF.polish_vignette(
+                restyle, grid, [d], proc_dest=proc, clean_dest=clean,
+                pad_rgb=self.PAD, fade=96, inset=8, scale=16, blur=2, open_r=1, close_r=2,
+            )
+            self.assertIn((0, 0), present)
+            self.assertIn((1, 0), present)
+            left = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            right = np.asarray(Image.open(restyle / "0" / "1_0.webp").convert("RGB"))
+            # deep in the green half: green, not dest gray
+            for tile in (left, right):
+                pix = tile[400, 256]
+                self.assertGreater(int(pix[1]), 80, pix.tolist())
+                self.assertFalse(np.allclose(pix, self.GRAY, atol=15), pix.tolist())
+            # the quilted dest gray must not appear as a mid-gray pillow
+            for tile in (left, right):
+                grayish = np.all(np.abs(tile.astype(int) - self.GRAY) <= 12, axis=2)
+                self.assertLess(float(grayish.mean()), 0.01, "leftover dest pillows")
+            # seam is continuous in the solid interior
+            jump = np.abs(left[400, -1].astype(int) - right[400, 0].astype(int)).mean()
+            self.assertLess(float(jump), 10.0, jump)
+            # far above the half-plane is viewer beige, not dark pad
+            self.assertTrue(np.all(np.abs(left[20, 20].astype(int) - SF.VIEW_FOG) <= 8))
+            # idempotent: a second run, reading dest which is now faded,
+            # still starts from clean staging / source and matches
+            snap = left.copy()
+            present2 = SF.polish_vignette(
+                restyle, grid, [d], proc_dest=proc, clean_dest=clean,
+                pad_rgb=self.PAD, fade=96, inset=8, scale=16, blur=2, open_r=1, close_r=2,
+            )
+            left2 = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            self.assertEqual(set(present2), set(present))
+            self.assertLess(float(np.abs(left2.astype(int) - snap.astype(int)).max()), 3)
+
+    def test_changing_fade_does_not_stack_on_the_previous_fade(self):
+        """A wider fade re-reads clean staging, so dest cannot double-fade."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # Green on the left half so the fade lives inside this tile.
+            src = np.full((512, 512, 3), self.PAD, dtype=np.uint8)
+            src[:, :240] = self.GREEN
+            d = self._district(root, width=512, height=512, rgb=src)
+            restyle = root / "restyle"
+            clean = root / "clean"
+            (restyle / "0").mkdir(parents=True)
+            Image.new("RGB", (512, 512), self.GRAY).save(restyle / "0" / "0_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 2}
+            SF.polish_vignette(
+                restyle, grid, [d], clean_dest=clean,
+                pad_rgb=self.PAD, fade=48, inset=8, scale=16, blur=1, open_r=0, close_r=1,
+            )
+            first = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            SF.polish_vignette(
+                restyle, grid, [d], clean_dest=clean,
+                pad_rgb=self.PAD, fade=160, inset=8, scale=16, blur=1, open_r=0, close_r=1,
+            )
+            second = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            # Deep inside the green half stays green (not washed twice).
+            self.assertGreater(int(second[256, 40, 1]), 80)
+            self.assertFalse(np.allclose(second[256, 40], self.GRAY, atol=20))
+            # A probe just past the short fade is beige after fade=48,
+            # but would be mid-blend if 160 were stacked on that beige.
+            # After a clean re-apply of 160 it is a green-to-beige midtone,
+            # greener than a stacked (already-beige) pixel would be.
+            probe = second[256, 200]  # ~40 px outside the 240-edge, inside the 160 band
+            self.assertGreater(int(probe[1]), 50, probe.tolist())
+            self.assertFalse(np.array_equal(first, second))
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
