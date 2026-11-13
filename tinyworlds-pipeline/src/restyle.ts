@@ -14,6 +14,20 @@ export const DEFAULT_PROMPT =
   "white and pastel mid-rises, dense concrete and brick urban villages, tropical Shenzhen palms and greenery. " +
   "Stay isometric pixel art — not photorealistic, not 3D CGI, not a painting. Consistent pixel scale across the frame.";
 
+/** Habbo Hotel / cool isometric look, used for Shenzhen sample restyles. */
+export const HABBO_PROMPT =
+  "Restyle this isometric pixel-art city view into classic Habbo Hotel (Sulake) style. " +
+  "Keep the exact camera, 2:1 dimetric projection, building footprints, street layout, parks, water and skyline silhouette. " +
+  "Do not add, remove, merge, split or move any building, road or landmark. Do not invent text or new structures. " +
+  "Crisp 2:1 isometric pixel lines. 1-pixel near-black outlines on every building edge and roof lip. " +
+  "Flat bright cel-shaded faces with exactly three tones: light roof, mid left wall, dark right wall. " +
+  "No gradients, no ambient occlusion, no photo-realistic lighting, no film grain, no muddy shadows. " +
+  "Limited saturated cheerful palette: cream, coral red, gold yellow, sky blue, mint green, teal, white, sand. " +
+  "Chunky regular window grids — even rows and columns, dark panes, thick mullions. " +
+  "Toy-like simple blocky building forms. Clean diamond-tiled cream pavement. " +
+  "Cute chunky palm trees with dark outlines. Bright clean parks. " +
+  "Preserve landmark identities and relative heights. Stay isometric pixel art, not photorealistic, not 3D CGI.";
+
 /** Current best OpenAI image-edit model (gpt-image-1 was shut down 23 Oct 2026). Sunburst is the editing-precision line; 2.6 is the latest. */
 export const DEFAULT_OPENAI_MODEL = "gpt-image-2.6-sunburst";
 export const DEFAULT_OPENAI_QUALITY = "high";
@@ -195,6 +209,8 @@ export interface RestyleOpts {
   window?: number;
   overlap?: number;
   prompt?: string;
+  /** When "habbo", use HABBO_PROMPT unless `prompt` is set. */
+  look?: "habbo";
   /** Injected in tests: (png bytes) => restyled png bytes. */
   paint?: (png: Buffer) => Promise<Buffer>;
   log?: (msg: string) => void;
@@ -285,7 +301,7 @@ async function paintOpenAI(
 export async function restyleImage(opts: RestyleOpts): Promise<void> {
   const window = opts.window ?? DEFAULT_WINDOW;
   const overlap = opts.overlap ?? DEFAULT_OVERLAP;
-  const prompt = opts.prompt ?? DEFAULT_PROMPT;
+  const prompt = opts.prompt ?? (opts.look === "habbo" ? HABBO_PROMPT : DEFAULT_PROMPT);
   const log = opts.log ?? console.log;
   let paint = opts.paint;
   if (!paint) {

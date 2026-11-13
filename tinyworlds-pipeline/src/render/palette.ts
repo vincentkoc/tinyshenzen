@@ -120,6 +120,30 @@ const RAMP_DEFS = {
   // ---- Shenzhen glass (ids last, so existing ramps keep their numbers)
   glassCyan: "#2eb8cc",
   glassSky: "#8ed0e6",
+  // ---- Habbo / cheerful isometric (append only)
+  habboCream: "#f3e2b0",
+  habboSand: "#efd089",
+  habboWhite: "#f7f4ee",
+  habboCoral: "#e8413c",
+  habboGold: "#ffc933",
+  habboSky: "#3d8fe0",
+  habboMint: "#4dbb5a",
+  habboTeal: "#2db8a8",
+  habboPink: "#ef7aa8",
+  habboOrange: "#f4842a",
+  habboLilac: "#9b7ce0",
+  habboInk: "#1a1a28",
+  habboPavement: "#efe6cc",
+  habboTile: "#dccfae",
+  habboGrass: "#6dcc4e",
+  habboLawn: "#8edc63",
+  habboPalm: "#3daf4a",
+  habboTrunk: "#a56a3a",
+  habboGlass: "#5ec8e8",
+  habboRoofRed: "#e8413c",
+  habboRoofBlue: "#3a7fd4",
+  habboRoofYellow: "#f0c430",
+  habboRoofTeal: "#2aa89a",
 } as const;
 
 export type RampName = keyof typeof RAMP_DEFS;

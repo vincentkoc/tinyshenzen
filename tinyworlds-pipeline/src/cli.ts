@@ -155,16 +155,19 @@ program
   .option("--window <n>", "tile size in px", String(DEFAULT_WINDOW))
   .option("--overlap <n>", "feather hem in px", String(DEFAULT_OVERLAP))
   .option("--prompt <text>", "override the default Shenzhen isometric-pixel prompt")
-  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string }) => {
+  .option("--look <style>", "named prompt: habbo (Habbo Hotel / cool isometric)")
+  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string; look?: string }) => {
     const input = path.resolve(opts.in);
     const parsed = path.parse(input);
     const output = path.resolve(opts.out ?? path.join(parsed.dir, `${parsed.name}-restyled${parsed.ext}`));
+    const look = opts.look === "habbo" ? "habbo" : undefined;
     await restyleImage({
       input,
       output,
       window: Math.max(32, Math.round(Number(opts.window))),
       overlap: Math.max(0, Math.round(Number(opts.overlap))),
       prompt: opts.prompt,
+      look,
     });
   });
 

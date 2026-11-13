@@ -101,7 +101,73 @@ function makePalm(r: number, variant: number): Sprite {
   return { w, h, anchorX: cx, r: frondR, px };
 }
 
+
+/**
+ * A chunky Habbo-style palm: fat trunk, a simple round crown of blocky fronds, 1 px dark outline
+ * (sprite code 5). Toy-like and regular, not a wispy spray of fronds.
+ */
+function makeHabboPalm(r: number, variant: number): Sprite {
+  const frondR = Math.max(4, r + 1);
+  const trunkH = Math.max(4, Math.round(r * 1.4));
+  const pad = 1;
+  const innerW = frondR * 2 + 1;
+  const cx = frondR + pad;
+  const cy = Math.max(3, Math.round(frondR * 0.7)) + pad;
+  const w = innerW + pad * 2;
+  const h = cy + 1 + trunkH + pad;
+  const body = new Uint8Array(w * h);
+  const fronds = 7 + (variant % 2);
+  const tilt = ((variant * 13) % 9) * 0.04;
+  for (let i = 0; i < fronds; i++) {
+    const ang = (i / fronds) * Math.PI * 2 + tilt;
+    const len = Math.max(3, Math.round(frondR * (0.85 + ((variant + i) % 3) * 0.05)));
+    for (let t = 0; t <= len; t++) {
+      const drop = (t / len) * (t / len) * 0.4;
+      const x = Math.round(cx + Math.cos(ang) * t);
+      const y = Math.round(cy + Math.sin(ang) * t * 0.58 + drop * frondR * 0.28);
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [-1, 0]] as const) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || xx >= w || yy < 0 || yy >= h) continue;
+        const lit = Math.cos(ang) < 0.2 && Math.sin(ang) < 0.25;
+        const tip = t > len * 0.7;
+        const code = tip || lit ? 1 : Math.cos(ang) < -0.3 ? 3 : 2;
+        if (body[yy * w + xx] === 0) body[yy * w + xx] = code;
+      }
+    }
+  }
+  if (cx < w && cy < h) body[cy * w + cx] = 1;
+  // fat 2 px trunk
+  for (let y = cy; y < h - pad; y++) {
+    for (const dx of r >= 5 ? [-1, 0, 1] : [0, 1]) {
+      const xx = cx + dx;
+      if (xx >= 0 && xx < w && body[y * w + xx] === 0) body[y * w + xx] = 4;
+    }
+  }
+  // 1 px ink outline in empty neighbours
+  const px = new Uint8Array(body);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (body[y * w + x] !== 0) continue;
+      let n = false;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        const c = body[yy * w + xx];
+        if (c !== 0) n = true;
+      }
+      if (n) px[y * w + x] = 5;
+    }
+  }
+  return { w, h, anchorX: cx, r: frondR, px };
+}
+
 const PALMS: Sprite[] = [3, 4, 4, 5, 6, 7].flatMap((r, i) => [0, 1, 2, 3].map((v) => makePalm(r, v + i * 5)));
+const HABBO_PALMS: Sprite[] = [4, 5, 5, 6, 7, 8].flatMap((r, i) =>
+  [0, 1, 2, 3].map((v) => makeHabboPalm(r, v + i * 5)),
+);
+
 
 /** True when this seed should be a palm rather than a leafy crown. */
 export function isPalmSeed(seed: number, setting: number): boolean {
@@ -113,10 +179,39 @@ export function isPalmSeed(seed: number, setting: number): boolean {
   return r < 1;
 }
 
-export function treeSprite(setting: number, seed: number, palms = false): Sprite {
-  if (palms && isPalmSeed(seed, setting)) return PALMS[seed % PALMS.length];
+export function treeSprite(setting: number, seed: number, palms = false, habbo = false): Sprite {
+  if (palms && isPalmSeed(seed, setting)) {
+    const set = habbo ? HABBO_PALMS : PALMS;
+    return set[seed % set.length];
+  }
   const set = TREES[setting];
-  return set[seed % set.length];
+  const s = set[seed % set.length];
+  return habbo ? outlineSprite(s) : s;
+}
+
+/** Expand a sprite by 1 px and ink every empty neighbour of a filled pixel (Habbo outline). */
+function outlineSprite(s: Sprite): Sprite {
+  const w = s.w + 2;
+  const h = s.h + 2;
+  const body = new Uint8Array(w * h);
+  for (let y = 0; y < s.h; y++) {
+    for (let x = 0; x < s.w; x++) body[(y + 1) * w + (x + 1)] = s.px[y * s.w + x];
+  }
+  const px = new Uint8Array(body);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (body[y * w + x] !== 0) continue;
+      let n = false;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const xx = x + dx;
+        const yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+        if (body[yy * w + xx] !== 0) n = true;
+      }
+      if (n) px[y * w + x] = 5;
+    }
+  }
+  return { w, h, anchorX: s.anchorX + 1, r: s.r, px };
 }
 
 export type Flora = "temperate" | "tropical" | "subtropical" | "boreal" | "montane";

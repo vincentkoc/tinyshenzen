@@ -1,8 +1,8 @@
 # Tiny Shenzhen
 
-An isometric pixel-art map of Shenzhen, China: the Civic Center, Ping An Finance Centre and
-the Futian CBD, glass curtain-wall towers, white and pastel mid-rises, dense urban villages,
-palms and the parks, generated from open data.
+An isometric pixel-art map of Shenzhen, China, in a Habbo Hotel / cool isometric style:
+the Civic Center, Ping An Finance Centre and the Futian CBD, chunky glass towers, colourful
+mid-rises, dense urban villages, palms and the parks, generated from open data.
 
 This project is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT
 Licence, © 2026 Nihey Takizawa): the same pipeline and viewer, with a Shenzhen city
@@ -18,9 +18,12 @@ model if you provide a key (see below).
 | `tinysz` (default) | A roughly two-kilometre box around the Civic Center (22.5455° N, 114.0683° E), including Ping An Finance Centre and Lianhuashan Park. Use this first: it fetches and renders quickly. |
 | `tinysz-full` | The urban core: Futian, Nanshan, Luohu and neighbouring districts (lat 22.45–22.75, lon 113.80–114.30). This is a large extract; expect a long download and render. |
 
-The style (`SHENZHEN` in `tinyworlds-pipeline/src/scene/styles.ts`) leans on glass curtain-wall
-supertalls (in the manner of Ping An Finance Centre), white and pastel mid-rises, concrete and
-brick urban villages (chengzhongcun / handshake buildings), and tropical flora. Named landmarks
+The style (`SHENZHEN` in `tinyworlds-pipeline/src/scene/styles.ts`) is drawn in a city-gated
+Habbo Hotel look (`look.habbo`): crisp 2:1 dimetric pixel lines, 1-pixel dark outlines, flat
+three-tone cel-shaded faces, a limited cheerful palette, chunky regular window grids, clean
+diamond ground tiles and toy-like palms. Other cities that share this pipeline are untouched.
+Glass supertalls (in the manner of Ping An Finance Centre), pastel mid-rises and concrete
+urban villages (chengzhongcun / handshake buildings) still sit on tropical flora. Named landmarks
 — Ping An Finance Centre, KK100, Window of the World, Shenzhen Bay Park, China Resources
 Headquarters, Shun Hing Square, the Civic Center and the Stock Exchange — are curated so they
 can be searched, and the towers get explicit materials, tapers and heights.

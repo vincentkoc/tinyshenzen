@@ -9,6 +9,7 @@ import {
   S_HALF,
   S_HIGH,
   S_LIT,
+  S_OUTLINE,
   S_SHADE,
   SHADES,
   TRANSPARENT,
@@ -400,7 +401,11 @@ export class ChunkRenderer {
         const gy = y - gy0;
         if (gx < 0 || gy < 0 || gx >= GW || gy >= GH) continue;
         const i = gy * GW + gx;
-        const chance = TREE_CHANCE[gk[i]];
+        let chance = TREE_CHANCE[gk[i]];
+        if (this.scene.look?.habbo) {
+          // fewer, so each chunky outlined tree reads; a Habbo park is not a felt of leaves
+          chance = Math.round(chance * (gk[i] === G.Forest ? 0.38 : 0.5));
+        }
         if (chance === 0 || ((h >>> 8) & 255) >= chance || gh[i] !== 0) continue;
         const kind = gk[i];
         scatter.push(
@@ -417,7 +422,7 @@ export class ChunkRenderer {
     }
     // trees cast a little shadow too
     for (let n = 0; n < scatter.length; n += 4) {
-      const r = treeSprite(scatter[n + 3], scatter[n + 2], this.usePalms()).r;
+      const r = treeSprite(scatter[n + 3], scatter[n + 2], this.usePalms(), !!this.scene.look?.habbo).r;
       const tall = r * 14;
       fillEllipse(scatter[n] - gx0 + 0.5, scatter[n + 1] - gy0 + 0.5, r * 0.8, r * 0.4, GW, GH, (y, a, b) => {
         const row = y * GW;
@@ -498,9 +503,13 @@ export class ChunkRenderer {
     const xy = vol.xy;
 
     // floors and bays in px: integers, so windows land on the pixel grid
-    const F = pattern === Pattern.Curtain ? 6 : 8;
-    const bayM =
-      pattern === Pattern.Curtain
+    const habbo = !!this.scene.look?.habbo;
+    const F = habbo ? (pattern === Pattern.Curtain ? 8 : 7) : pattern === Pattern.Curtain ? 6 : 8;
+    const bayM = habbo
+      ? pattern === Pattern.Curtain
+        ? 4.2
+        : 3.8
+      : pattern === Pattern.Curtain
         ? 2
         : pattern === Pattern.Sparse
           ? 6
@@ -530,18 +539,35 @@ export class ChunkRenderer {
           const dq = (dx / 2 + dy) / k;
           const lenM = Math.hypot(dp, dq);
           const light = (orient * (dq * this.sunP - dp * this.sunQ)) / (lenM || 1);
-          const tone = light > 0.25 ? S_LIT : light > -0.25 ? S_HALF : S_SHADE;
-          const faceCode = tone === S_LIT ? F_WALL_LIT : tone === S_HALF ? F_WALL_HALF : F_WALL_SHADE;
+          const slope = dy / dx;
+          // Habbo: left face (positive screen slope) mid, right face dark, roof is a flat light
+          const tone = habbo
+            ? slope > 0
+              ? S_HALF
+              : S_SHADE
+            : light > 0.25
+              ? S_LIT
+              : light > -0.25
+                ? S_HALF
+                : S_SHADE;
+          const faceCode = habbo
+            ? slope > 0
+              ? F_WALL_LIT
+              : F_WALL_SHADE
+            : tone === S_LIT
+              ? F_WALL_LIT
+              : tone === S_HALF
+                ? F_WALL_HALF
+                : F_WALL_SHADE;
           const wallC = idx(wallRamp, tone);
-          const wallHi = idx(wallRamp, tone + 1);
-          const wallLo = idx(wallRamp, tone - 1);
-          const winC = idx(glassRamp, tone === S_LIT ? S_SHADE : S_DEEP);
-          const winHi = idx(glassRamp, tone === S_LIT ? S_LIT : S_SHADE);
+          const wallHi = habbo ? wallC : idx(wallRamp, tone + 1);
+          const wallLo = habbo ? wallC : idx(wallRamp, tone - 1);
+          const winC = idx(glassRamp, habbo ? S_DEEP : tone === S_LIT ? S_SHADE : S_DEEP);
+          const winHi = idx(glassRamp, habbo ? S_HALF : tone === S_LIT ? S_LIT : S_SHADE);
 
           const xl = dx < 0 ? bx : ax;
           const yl = dx < 0 ? by : ay;
           const xr = dx < 0 ? ax : bx;
-          const slope = dy / dx;
           const cFirst = Math.ceil(xl - 0.5);
           const cEnd = Math.ceil(xr - 0.5);
           const lenPx = cEnd - cFirst;
@@ -549,6 +575,8 @@ export class ChunkRenderer {
             const pxPerM = lenPx / (lenM || 1);
             let B = Math.round(bayM * pxPerM);
             if (pxPerM < 0.9 || B < 4) B = 0;
+            else if (habbo && B < 6) B = 6;
+            else if (habbo && B > 10) B = 10;
             else if (B > 14) B = 14;
             const bays = B > 0 ? Math.floor((lenPx - 1) / B) : 0;
             const margin = B > 0 ? (lenPx - bays * B + 1) >> 1 : 0;
@@ -570,8 +598,14 @@ export class ChunkRenderer {
                 if (H < hb[i]) continue;
                 const vv = H - Hb - 1; // rows above the foot of the wall
                 let colour = wallC;
-                if (vv === wallH - 1 && wallH >= 4) colour = wallHi;
-                else {
+                if (!habbo && vv === wallH - 1 && wallH >= 4) colour = wallHi;
+                else if (habbo) {
+                  // chunky regular window grid: dark panes, 1 px highlight at the top-left, thick mullions
+                  const vf = vv % F;
+                  if (inBay && vf >= 2 && vf < F - 1 && ub >= 2 && ub < B - 1) {
+                    colour = ub === 2 && vf === 2 ? winHi : winC;
+                  }
+                } else {
                   switch (pattern) {
                     case Pattern.Punched: {
                       if (vv === wallH - 2 && tallEnough) colour = wallLo;
@@ -799,7 +833,7 @@ export class ChunkRenderer {
         const d = this.fogDistance(x, y);
         if (d > fog.start && d >= fog.start + ((seed & 1023) / 1024) * (fog.end - fog.start) * 0.6) continue;
       }
-      const sprite = treeSprite(scatter[n + 3], seed, this.usePalms());
+      const sprite = treeSprite(scatter[n + 3], seed, this.usePalms(), !!this.scene.look?.habbo);
       const ramp = treeRamp(seed >>> 5, this.scene.flora);
       const left = x - sprite.anchorX - sx0;
       const top = y - sprite.h + 1 - sy0;
@@ -815,9 +849,14 @@ export class ChunkRenderer {
           const i = py * SW + px;
           if (H < hb[i]) continue;
           col[i] =
-            code === 4
-              ? idx(R.trunk, S_SHADE)
-              : idx(ramp, code === 1 ? S_HIGH : code === 2 ? S_LIT : S_SHADE);
+            code === 5
+              ? idx(R.habboInk, S_OUTLINE)
+              : code === 4
+                ? idx(this.scene.look?.habbo ? R.habboTrunk : R.trunk, S_SHADE)
+                : idx(
+                    this.scene.look?.habbo ? R.habboPalm : ramp,
+                    code === 1 ? S_HIGH : code === 2 ? S_LIT : S_SHADE,
+                  );
           hb[i] = H;
           obj[i] = -1;
           face[i] = F_TREE;
@@ -837,7 +876,9 @@ export class ChunkRenderer {
     const { col, hb, obj, face, SW, gk, gh, wd, GW, gx0, gy0, sx0, sy0 } = this;
     const { fog, vol } = this.scene;
     const out = new Uint16Array(job.w * job.h);
-    const ctx: GroundContext = { gk, wd, GW };
+    const ctx: GroundContext = { gk, wd, GW, habbo: !!this.scene.look?.habbo };
+    const habbo = !!this.scene.look?.habbo;
+    const ink = idx(R.habboInk, S_OUTLINE);
     const fogSpan = fog.end - fog.start;
     const clip = this.scene.clip;
 
@@ -864,14 +905,22 @@ export class ChunkRenderer {
 
         if (who === 0) {
           if (job.foggy) {
-            // the ground dissolves through an ordered dither, with a slow wobble so the edge is not a clean curve
             const d = this.fogDistance(mx + 0.5, my + 0.5);
             if (d > fog.start) {
-              const wobble = (valueNoise(mx / 420, my / 210) - 0.5) * 700;
-              const cut = fog.start + ((BAYER8[(my & 7) * 8 + (mx & 7)] + 0.5) / 64) * fogSpan;
-              if (d + wobble >= cut) {
-                out[o] = TRANSPARENT;
-                continue;
+              if (habbo) {
+                // a clean cutoff, no Bayer grain or noise wobble
+                if (d >= fog.start + fogSpan * 0.92) {
+                  out[o] = TRANSPARENT;
+                  continue;
+                }
+              } else {
+                // the ground dissolves through an ordered dither, with a slow wobble so the edge is not a clean curve
+                const wobble = (valueNoise(mx / 420, my / 210) - 0.5) * 700;
+                const cut = fog.start + ((BAYER8[(my & 7) * 8 + (mx & 7)] + 0.5) / 64) * fogSpan;
+                if (d + wobble >= cut) {
+                  out[o] = TRANSPARENT;
+                  continue;
+                }
               }
             }
           }
@@ -918,6 +967,18 @@ export class ChunkRenderer {
           const up = i - SW;
           if (vol.flags[who - 1] & F_NO_OUTLINE) {
             // deck pieces run into one another: no lips or lines between them
+          } else if (habbo) {
+            // 1 px near-black outline on silhouettes and every face boundary (roof/wall, left/right)
+            const edge =
+              obj[lf] !== who ||
+              obj[rt] !== who ||
+              obj[up] !== who ||
+              obj[below] !== who ||
+              face[lf] !== f ||
+              face[rt] !== f ||
+              face[up] !== f ||
+              face[below] !== f;
+            if (edge) c = ink;
           } else if (f === F_ROOF && obj[below] === who && face[below] !== F_ROOF) c = LIGHTER[c];
           else if (
             (obj[lf] !== who && hb[lf] < H) ||
@@ -928,6 +989,7 @@ export class ChunkRenderer {
           else if (f === F_ROOF && ((obj[lf] !== who && hb[lf] === H) || (obj[up] !== who && hb[up] === H)))
             c = DARKER[c];
           if (
+            !habbo &&
             this.scene.look?.canyonAO &&
             (f === F_WALL_LIT || f === F_WALL_HALF || f === F_WALL_SHADE) &&
             my - sy0 + 2 < this.SH &&

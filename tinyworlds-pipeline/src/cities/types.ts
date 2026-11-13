@@ -98,6 +98,12 @@ export interface CityLook {
   roofFurniture?: boolean;
   /** Some trees are drawn as palms (with tropical or subtropical flora). */
   palms?: boolean;
+  /**
+   * Habbo Hotel / cool isometric pixel-art look: crisp 2:1 dimetric lines, 1 px dark outlines,
+   * flat three-tone cel-shaded faces, a limited cheerful palette, chunky regular windows,
+   * clean diamond ground tiles and toy-like palms. Turns off sky-glass gradients and canyon AO.
+   */
+  habbo?: boolean;
 }
 
 export interface City {
