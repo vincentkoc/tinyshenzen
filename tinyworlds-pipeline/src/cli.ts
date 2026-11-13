@@ -16,7 +16,7 @@ import { renderHomeCard } from "./render/home-card.js";
 import { renderAll } from "./render/run.js";
 import { loadScene } from "./render/scene.js";
 import { buildScene } from "./scene/build.js";
-import { DEFAULT_OVERLAP, DEFAULT_WINDOW, restyleImage } from "./restyle.js";
+import { DEFAULT_OVERLAP, DEFAULT_WINDOW, resolveQuality, restyleImage } from "./restyle.js";
 import { fetchAll } from "./sources/index.js";
 
 const program = new Command();
@@ -156,11 +156,13 @@ program
   .option("--overlap <n>", "feather hem in px", String(DEFAULT_OVERLAP))
   .option("--prompt <text>", "override the default Shenzhen isometric-pixel prompt")
   .option("--look <style>", "named prompt: habbo | pixelsg (Pixel-Singapore-inspired miniature)")
-  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string; look?: string }) => {
+  .option("--quality <level>", "OpenAI image quality: low | medium | high (default: high, or RESTYLE_QUALITY)")
+  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string; look?: string; quality?: string }) => {
     const input = path.resolve(opts.in);
     const parsed = path.parse(input);
     const output = path.resolve(opts.out ?? path.join(parsed.dir, `${parsed.name}-restyled${parsed.ext}`));
     const look = opts.look === "habbo" || opts.look === "pixelsg" ? opts.look : undefined;
+    const quality = resolveQuality(opts.quality);
     await restyleImage({
       input,
       output,
@@ -168,6 +170,7 @@ program
       overlap: Math.max(0, Math.round(Number(opts.overlap))),
       prompt: opts.prompt,
       look,
+      quality,
     });
   });
 

@@ -54,6 +54,16 @@ export const PIXELSG_PROMPT =
 /** Current best OpenAI image-edit model (gpt-image-1 was shut down 23 Oct 2026). Sunburst is the editing-precision line; 2.6 is the latest. */
 export const DEFAULT_OPENAI_MODEL = "gpt-image-2.6-sunburst";
 export const DEFAULT_OPENAI_QUALITY = "high";
+export const OPENAI_QUALITIES = ["low", "medium", "high"] as const;
+export type OpenAIQuality = (typeof OPENAI_QUALITIES)[number];
+
+/** Resolve a quality flag, falling back to RESTYLE_QUALITY or high. */
+export function resolveQuality(raw?: string | null): OpenAIQuality {
+  const q = (raw?.trim() || process.env.RESTYLE_QUALITY?.trim() || DEFAULT_OPENAI_QUALITY).toLowerCase();
+  if (q === "low" || q === "medium" || q === "high") return q;
+  throw new Error(`Unknown restyle quality "${raw ?? q}". Use low, medium or high.`);
+}
+
 
 /** Official image-token rates, USD per million, as of late 2026. */
 const USD_PER_M = { textIn: 5, imageIn: 8, imageOut: 30 } as const;
@@ -234,6 +244,8 @@ export interface RestyleOpts {
   prompt?: string;
   /** Named prompt: "habbo" or "pixelsg", unless `prompt` is set. */
   look?: "habbo" | "pixelsg";
+  /** OpenAI Images API quality: low, medium or high. Default is high, or RESTYLE_QUALITY. */
+  quality?: OpenAIQuality;
   /** Injected in tests: (png bytes) => restyled png bytes. */
   paint?: (png: Buffer) => Promise<Buffer>;
   log?: (msg: string) => void;
@@ -277,13 +289,13 @@ async function paintOpenAI(
   prompt: string,
   key: string,
   model: string,
+  quality: OpenAIQuality,
   log?: (msg: string) => void,
 ): Promise<Buffer> {
   const meta = await sharp(png).metadata();
   const w = meta.width ?? 1024;
   const h = meta.height ?? 1024;
   const size = openaiEditSize(w, h);
-  const quality = (process.env.RESTYLE_QUALITY ?? DEFAULT_OPENAI_QUALITY).trim() || DEFAULT_OPENAI_QUALITY;
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
@@ -333,10 +345,11 @@ export async function restyleImage(opts: RestyleOpts): Promise<void> {
     const detected = detectProvider();
     if ("error" in detected) throw new Error(detected.error);
     log(`restyle: ${detected.provider} (${detected.model})`);
+    const quality = resolveQuality(opts.quality);
     paint =
       detected.provider === "gemini"
         ? (png) => paintGemini(png, prompt, detected.key, detected.model)
-        : (png) => paintOpenAI(png, prompt, detected.key, detected.model, log);
+        : (png) => paintOpenAI(png, prompt, detected.key, detected.model, quality, log);
   }
 
   const src = sharp(opts.input).ensureAlpha();

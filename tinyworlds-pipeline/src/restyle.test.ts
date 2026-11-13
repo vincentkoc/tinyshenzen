@@ -10,6 +10,7 @@ import {
   edgeWeight,
   finalise,
   openaiEditSize,
+  resolveQuality,
   restyleImage,
   tilesFor,
   usdFromUsage,
@@ -186,3 +187,33 @@ describe("usdFromUsage", () => {
     expect(usd).toBeCloseTo(0.05216, 5);
   });
 });
+
+describe("resolveQuality", () => {
+  const snapshot = { ...process.env };
+  afterEach(() => {
+    for (const k of Object.keys(process.env)) {
+      if (!(k in snapshot)) delete process.env[k];
+    }
+    Object.assign(process.env, snapshot);
+  });
+
+  it("accepts low, medium and high, and falls back to high", () => {
+    delete process.env.RESTYLE_QUALITY;
+    expect(resolveQuality("medium")).toBe("medium");
+    expect(resolveQuality("HIGH")).toBe("high");
+    expect(resolveQuality("low")).toBe("low");
+    expect(resolveQuality(undefined)).toBe("high");
+    expect(resolveQuality("")).toBe("high");
+  });
+
+  it("honours RESTYLE_QUALITY when no flag is passed", () => {
+    process.env.RESTYLE_QUALITY = "medium";
+    expect(resolveQuality(undefined)).toBe("medium");
+    expect(resolveQuality("high")).toBe("high");
+  });
+
+  it("rejects an unknown quality", () => {
+    expect(() => resolveQuality("ultra")).toThrow(/unknown restyle quality/i);
+  });
+});
+
