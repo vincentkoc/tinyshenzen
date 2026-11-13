@@ -57,18 +57,24 @@ export function loadHeights(rawDir: string): HeightSampler | null {
   const index = JSON.parse(fs.readFileSync(indexFile, "utf8")) as HeightIndex;
   const tiles = index.tiles.map((t) => ({
     ...t,
+    bytes: t.bytes ?? 1,
+    unit: t.unit ?? "half-metres",
     data: zlib.gunzipSync(fs.readFileSync(path.join(dir, t.file))),
   }));
   const { res } = index;
+  const curve = index.curve ?? "open-buildings";
+  const nodataOf = (bytes: 1 | 2) => (bytes === 2 ? 65535 : NODATA);
 
-  /** Raster reading at a UTM point, or -1. Tiles of neighbouring S2 cells overlap; the first with data wins. */
+  /** Raster reading in metres at a UTM point, or -1. Overlapping tiles: the first with data wins. */
   const at = (x: number, y: number): number => {
     for (const t of tiles) {
       const px = Math.floor((x - t.x0) / res);
       const py = Math.floor((t.y1 - y) / res);
       if (px < 0 || py < 0 || px >= t.width || py >= t.height) continue;
-      const v = t.data[py * t.width + px];
-      if (v !== NODATA) return v / 2;
+      const i = py * t.width + px;
+      const v = t.bytes === 2 ? t.data[i * 2] + (t.data[i * 2 + 1] << 8) : t.data[i];
+      if (v === nodataOf(t.bytes)) continue;
+      return t.unit === "metres" ? v : v / 2;
     }
     return -1;
   };
@@ -119,7 +125,8 @@ export function loadHeights(rawDir: string): HeightSampler | null {
       }
       if (values.length === 0) return null;
       values.sort((a, b) => a - b);
-      return correct(values[Math.floor(values.length / 2)]);
+      const raw = values[Math.floor(values.length / 2)];
+      return curve === "identity" ? raw : correct(raw);
     },
   };
 }

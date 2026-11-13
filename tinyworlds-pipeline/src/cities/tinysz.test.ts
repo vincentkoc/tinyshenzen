@@ -42,7 +42,10 @@ describe("tinysz", () => {
     expect(tinysz.flora).toBe("tropical");
     expect(tinyszFull.flora).toBe("tropical");
     expect(tinysz.sources.map((s) => s.name)).toEqual(tinyszFull.sources.map((s) => s.name));
-    expect(tinysz.sources.length).toBeGreaterThanOrEqual(2);
+    expect(tinysz.sources.map((s) => s.name)).toContain("cnbh");
+    expect(tinysz.heights.raster).toBe(true);
+    expect(tinysz.attribution.some((a) => /CNBH-10m/.test(a))).toBe(true);
+    expect(tinysz.sources.length).toBeGreaterThanOrEqual(3);
     expect(tinysz.bbox).toEqual(TEST_BBOX);
     expect(tinyszFull.bbox).toEqual(FULL_BBOX);
     expect(tinysz.curated.some((p) => p.n === "Ping An Finance Centre")).toBe(true);

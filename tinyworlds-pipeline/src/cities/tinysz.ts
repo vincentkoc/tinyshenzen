@@ -1,6 +1,7 @@
 import path from "node:path";
 import { readAreas } from "../geom/geojson.js";
 import { SHENZHEN } from "../scene/styles.js";
+import { cnbh } from "../sources/cnbh.js";
 import { overture } from "../sources/overture.js";
 import { overtureAreas } from "../sources/overtureAreas.js";
 import { HEIGHT_FIXES, LANDMARKS } from "./tinysz.landmarks.js";
@@ -70,9 +71,14 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
     bbox: spec.bbox,
     start: { ...CENTER, scale: 0.85 },
     maxScale: 3,
-    attribution: ["© OpenStreetMap contributors", "Overture Maps Foundation"],
+    attribution: [
+      "© OpenStreetMap contributors",
+      "Overture Maps Foundation",
+      "CNBH-10m (Wu et al., CC BY 4.0)",
+    ],
     sources: [
       overture,
+      cnbh,
       overtureAreas({
         hoods: ["macrohood", "neighborhood"],
         rename: DISTRICT_NAMES,
@@ -105,7 +111,7 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
     areas,
 
     // Chinese residential storeys are a little under 3.3 m; where a model's height reads low, the floors decide
-    heights: { storey: 3.1, raster: false, floorsFirst: true },
+    heights: { storey: 3.1, raster: true, floorsFirst: true },
     style: SHENZHEN,
     landmarks: LANDMARKS,
     heightFixes: HEIGHT_FIXES,

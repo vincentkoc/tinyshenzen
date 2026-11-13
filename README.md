@@ -26,8 +26,12 @@ Headquarters, Shun Hing Square, the Civic Center and the Stock Exchange — are 
 can be searched, and the towers get explicit materials, tapers and heights.
 
 Data comes from [OpenStreetMap](https://www.openstreetmap.org/copyright) and the
-[Overture Maps Foundation](https://overturemaps.org/). Heights are taken from that data where
-they are mapped, or estimated from the number of floors.
+[Overture Maps Foundation](https://overturemaps.org/) (the buildings theme already mixes OSM
+with the East Asian Buildings dataset, doi:10.5281/zenodo.8174931, CC BY 4.0). Heights are
+taken from mapped OSM height or floors where they exist; the rest are read from
+[CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., 2023, CC BY 4.0), a 10 m
+building-height raster for China. Overture's own fetch still needs no API key; CNBH is
+downloaded from Zenodo, also publicly.
 
 ## Setup
 
@@ -119,8 +123,9 @@ Code is [MIT](LICENSE). The pipeline and viewer originated in
 for Tiny Shenzhen are © 2026 Vincent Koc. The MIT notice is kept in full.
 
 Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL) and the
-[Overture Maps Foundation](https://overturemaps.org/). The rendered tiles carry those
-attribution requirements.
+[Overture Maps Foundation](https://overturemaps.org/). Building heights that nobody mapped are
+taken from [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu, W., et al., 2023, CC BY 4.0).
+The rendered tiles carry those attribution requirements.
 
 The idea of a city redrawn tile by tile as isometric pixel art comes from
 [tinyrj](https://tinyrj.com/) and isometric.nyc, as credited by tinyworlds; this is an

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { toUtm, utmEpsg, utmZone } from "./utm.js";
+import { fromUtm, toUtm, utmEpsg, utmZone } from "./utm.js";
 
 describe("utm", () => {
   it("names the zone and its EPSG code", () => {
@@ -23,5 +23,24 @@ describe("utm", () => {
     const [ex, ey] = toUtm(-73.98566, 40.74844, 18, false);
     expect(ex).toBeCloseTo(585631.7347, 3);
     expect(ey).toBeCloseTo(4511326.9268, 3);
+  });
+
+  it("round-trips with toUtm to well under a millimetre and a thousandth of a degree", () => {
+    const samples: [number, number, number, boolean][] = [
+      [-47.8103, -21.1775, 23, true],
+      [-73.98566, 40.74844, 18, false],
+      [114.0683, 22.5455, 49, false],
+      [114.0683, 22.5455, 50, false],
+      [113.8, 22.45, 49, false],
+    ];
+    for (const [lon, lat, zone, south] of samples) {
+      const [x, y] = toUtm(lon, lat, zone, south);
+      const [lon2, lat2] = fromUtm(x, y, zone, south);
+      expect(lon2).toBeCloseTo(lon, 8);
+      expect(lat2).toBeCloseTo(lat, 8);
+      const [x2, y2] = toUtm(lon2, lat2, zone, south);
+      expect(x2).toBeCloseTo(x, 3);
+      expect(y2).toBeCloseTo(y, 3);
+    }
   });
 });
