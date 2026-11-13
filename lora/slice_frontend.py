@@ -23,8 +23,12 @@ per-tile seams — including over open water. `--polish-vignette` is
 the preferred free edge pass: it reslices the edge from the source
 restyle windows (never from already-faded dest tiles), keeps the bay
 water fill and south-shore land restore, builds one coarse coverage
-mask with morphological cleanup, and applies a single noise-free
-vignette (~1–2 tiles) to viewer beige. It is idempotent from source.
+mask with a wide blur and morphological close/open so the boundary
+does not follow source-tile edges, upsamples the distance field with
+bicubic interpolation, and applies a single vignette (~1–2 tiles) to
+viewer beige whose falloff is displaced by low-frequency noise so the
+edge looks organic rather than stepped in squares. It is idempotent
+from source.
 Higher zoom levels are rebuilt with viewer-fog padding so missing
 children do not become dark squares. Generated images are not
 committed.
@@ -1315,7 +1319,7 @@ def upsample_distance(
     tile: int = TILE,
     pad: int = 2,
 ) -> np.ndarray:
-    """Bilinear upsample of the coarse field for one z0 tile, padded for continuity."""
+    """Bicubic upsample of the coarse field for one z0 tile, padded for continuity."""
     h8 = tile // scale
     w8 = tile // scale
     ch, cw = field.shape
@@ -1330,7 +1334,7 @@ def upsample_distance(
     bot, right = y1 - ya1, x1 - xa1
     crop = np.pad(core, ((top, bot), (left, right)), mode="edge").astype(np.float32)
     im = Image.fromarray(crop, mode="F")
-    up = im.resize(((x1 - x0) * scale, (y1 - y0) * scale), Image.Resampling.BILINEAR)
+    up = im.resize(((x1 - x0) * scale, (y1 - y0) * scale), Image.Resampling.BICUBIC)
     arr = np.array(up, dtype=np.float32)
     off = pad * scale
     return arr[off : off + tile, off : off + tile]
@@ -1713,20 +1717,32 @@ def polish_smooth_edge(
 # already-faded dest tiles. It reslices each cell from the district
 # restyle windows (the plain slicer composite), fills bay water and
 # restores washed-out land, writes a clean staging copy, builds one
-# coarse coverage mask with morphological cleanup so the boundary has
-# no tile-aligned steps, and fades to viewer beige from that field
-# (~1–2 tiles, noise-free). Re-running always starts from the source
-# windows and the clean staging copies, never from dest.
+# coarse coverage mask with a wide blur and morphological close/open
+# so the boundary does not follow source-tile edges, bicubically
+# upsamples the signed-distance field, and fades to viewer beige with
+# a low-frequency organic displacement of the falloff (~1–2 tiles).
+# Re-running always starts from the source windows and the clean
+# staging copies, never from dest. Changing fade or smoothing
+# parameters discards only the field and fade progress; clean staging
+# is reused.
 # ---------------------------------------------------------------------------
 
 VIGNETTE_FADE = 768
 VIGNETTE_INSET = 32
 VIGNETTE_SCALE = 16
-VIGNETTE_BLUR = 8
-VIGNETTE_OPEN = 3
-VIGNETTE_CLOSE = 6
+# Coarse-pixel radii. One z0 tile is TILE/SCALE = 32 coarse cells, so
+# a blur of 20 and a close of 16 round a full-tile stair instead of
+# leaving a square step. DIST_BLUR is a second Gaussian on the signed
+# distance itself. NOISE is a low-frequency displacement of the fade
+# isoline, in z0 pixels, with period NOISE_PERIOD (also z0 px).
+VIGNETTE_BLUR = 20
+VIGNETTE_OPEN = 6
+VIGNETTE_CLOSE = 16
+VIGNETTE_DIST_BLUR = 6
+VIGNETTE_NOISE = 36
+VIGNETTE_NOISE_PERIOD = 384
 VIGNETTE_CLEAN_VERSION = "vignette-clean-1"
-VIGNETTE_FADE_VERSION = "vignette-fade-1"
+VIGNETTE_FADE_VERSION = "vignette-fade-2"
 
 
 def is_flat_neutral_wash(arr: np.ndarray) -> np.ndarray:
@@ -1847,6 +1863,81 @@ def morph_close(mask: np.ndarray, radius: int) -> np.ndarray:
     return dilated & (d_in >= radius)
 
 
+def gaussian_blur_float(field: np.ndarray, radius: float) -> np.ndarray:
+    """Separable Gaussian blur for a signed float field (PIL cannot blur mode F)."""
+    if radius <= 0:
+        return field.astype(np.float32, copy=False)
+    sigma = float(radius)
+    r = max(1, int(math.ceil(3.0 * sigma)))
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    kernel = np.exp(-(x * x) / (2.0 * sigma * sigma))
+    kernel /= kernel.sum()
+    kernel = kernel.astype(np.float32)
+    src = np.pad(field.astype(np.float32, copy=False), ((r, r), (r, r)), mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(src, kernel.size, axis=1)
+    tmp = np.tensordot(windows, kernel, axes=([2], [0]))
+    windows = np.lib.stride_tricks.sliding_window_view(tmp, kernel.size, axis=0)
+    return np.tensordot(windows, kernel, axes=([2], [0])).astype(np.float32)
+
+
+def _hash_lattice(ix: np.ndarray, iy: np.ndarray, seed: int) -> np.ndarray:
+    """Deterministic lattice hash on [-1, 1], stable across tiles."""
+    n = (
+        ix.astype(np.int64) * np.int64(374761393)
+        + iy.astype(np.int64) * np.int64(668265263)
+        + np.int64(seed) * np.int64(1274126177)
+    )
+    n = np.bitwise_xor(n, n >> 13) * np.int64(1274126177)
+    n = np.bitwise_xor(n, n >> 16)
+    return ((n & np.int64(0x7FFFFFFF)).astype(np.float32) / np.float32(0x7FFFFFFF)) * np.float32(2.0) - np.float32(1.0)
+
+
+def fade_boundary_noise(
+    tx: int,
+    ty: int,
+    *,
+    tile: int = TILE,
+    amplitude: float = VIGNETTE_NOISE,
+    period: float = VIGNETTE_NOISE_PERIOD,
+    seed: int = 17,
+) -> np.ndarray:
+    """Low-frequency value noise in z0 pixels, continuous across tile seams.
+
+    Two octaves of smooth-interpolated lattice noise, hashed from world
+    (not tile-local) coordinates so neighbouring tiles agree on the
+    shared edge. Amplitude 0 returns zeros. Used to displace the fade
+    isoline so a straight coverage edge does not read as a square step.
+    """
+    if amplitude <= 0 or period <= 0:
+        return np.zeros((tile, tile), dtype=np.float32)
+    yy, xx = np.mgrid[0:tile, 0:tile]
+    wx = (tx * tile + xx).astype(np.float32)
+    wy = (ty * tile + yy).astype(np.float32)
+
+    def octave(length: float, amp: float, octave_seed: int) -> np.ndarray:
+        gx = wx / np.float32(length)
+        gy = wy / np.float32(length)
+        x0 = np.floor(gx)
+        y0 = np.floor(gy)
+        fx = gx - x0
+        fy = gy - y0
+        ux = fx * fx * (3.0 - 2.0 * fx)
+        uy = fy * fy * (3.0 - 2.0 * fy)
+        ix0 = x0.astype(np.int64)
+        iy0 = y0.astype(np.int64)
+        n00 = _hash_lattice(ix0, iy0, octave_seed)
+        n10 = _hash_lattice(ix0 + 1, iy0, octave_seed)
+        n01 = _hash_lattice(ix0, iy0 + 1, octave_seed)
+        n11 = _hash_lattice(ix0 + 1, iy0 + 1, octave_seed)
+        nx0 = n00 * (1.0 - ux) + n10 * ux
+        nx1 = n01 * (1.0 - ux) + n11 * ux
+        return (nx0 * (1.0 - uy) + nx1 * uy) * np.float32(amp)
+
+    out = octave(period, amplitude * 0.7, seed)
+    out += octave(period * 0.5, amplitude * 0.3, seed + 101)
+    return out.astype(np.float32)
+
+
 def smooth_coverage_mask(
     acc: np.ndarray,
     *,
@@ -1858,8 +1949,10 @@ def smooth_coverage_mask(
     """Threshold a coarse content-fraction field after a blur and open/close.
 
     The Gaussian blur (in coarse pixels) rounds tile-aligned stairs;
-    opening drops per-tile islands; closing fills small notches. The
-    result is a single organic coverage region, not a grid of blobs.
+    opening drops isolated islands; closing fills notches up to about
+    `close_r` coarse cells (a full z0 tile is 32 cells at the default
+    scale). The result is a single organic coverage region, not a
+    grid of blobs.
     """
     field = acc.astype(np.float32)
     if blur > 0:
@@ -1873,10 +1966,21 @@ def smooth_coverage_mask(
     return mask
 
 
-def fade_stamp(fade: int, inset: int, scale: int, blur: int, open_r: int, close_r: int) -> str:
+def fade_stamp(
+    fade: int,
+    inset: int,
+    scale: int,
+    blur: int,
+    open_r: int,
+    close_r: int,
+    dist_blur: float = VIGNETTE_DIST_BLUR,
+    noise_amp: float = VIGNETTE_NOISE,
+    noise_period: float = VIGNETTE_NOISE_PERIOD,
+) -> str:
     return (
         f"{VIGNETTE_FADE_VERSION} fade={fade} inset={inset} scale={scale} "
-        f"blur={blur} open={open_r} close={close_r}\n"
+        f"blur={blur} open={open_r} close={close_r} dist_blur={dist_blur} "
+        f"noise={noise_amp} period={noise_period}\n"
     )
 
 
@@ -2014,10 +2118,16 @@ def build_vignette_field(
     blur: int = VIGNETTE_BLUR,
     open_r: int = VIGNETTE_OPEN,
     close_r: int = VIGNETTE_CLOSE,
+    dist_blur: float = VIGNETTE_DIST_BLUR,
     threshold: float = 0.4,
     pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
 ) -> np.ndarray:
-    """Coarse signed-distance field, in z0 pixels, from the clean staging tiles."""
+    """Coarse signed-distance field, in z0 pixels, from the clean staging tiles.
+
+    After the morphologically-smoothed mask is turned into a signed
+    distance, a second Gaussian (`dist_blur`, in coarse pixels) rounds
+    remaining isolines before the field is scaled to z0 units.
+    """
     cols, rows = grid["cols"], grid["rows"]
     h8, w8 = TILE // scale, TILE // scale
     ch, cw = rows * h8, cols * w8
@@ -2052,6 +2162,9 @@ def build_vignette_field(
     max_r = int(np.ceil((fade + inset) / scale) + 3)
     print(f"  chamfer on {cw}×{ch} coarse grid, max_r={max_r}, content frac={float(mask.mean()):.3f}…", flush=True)
     signed = signed_distance_field(mask, max_r)
+    if dist_blur > 0:
+        print(f"  blurring signed field, radius={dist_blur} coarse px", flush=True)
+        signed = gaussian_blur_float(signed, dist_blur)
     signed *= np.float32(scale)
     print(f"  vignette field from {n} clean tiles, {time.time() - t0:.1f}s", flush=True)
     return signed
@@ -2105,16 +2218,23 @@ def apply_vignette_fade(
     lossless_z0: bool = True,
     progress_path: Path | None = None,
     edge_list_path: Path | None = None,
+    noise_amp: float = VIGNETTE_NOISE,
+    noise_period: float = VIGNETTE_NOISE_PERIOD,
 ) -> set[tuple[int, int]]:
     """Fade clean staging tiles onto dest for the edge band only.
 
     Reads only from `clean_dest` (and the distance field), never from
     dest's existing pixels, so a re-run cannot stack fades. Resume-safe.
+    Tiles that leave the fade band for the deep interior (because a
+    wider coverage smooth moved the boundary) are restored from clean
+    staging so they do not keep a stale fade.
     """
     cols, rows = grid["cols"], grid["rows"]
     present = present_from_disk(dest, cols, rows)
+    dest0 = dest / "0"
     band, exterior = edge_band_from_field(field, grid, fade=fade, inset=inset, scale=scale)
     edge_list_path = edge_list_path or (dest / ".vignette-edge.jsonl")
+    old_band = _load_progress(edge_list_path) if edge_list_path.exists() else set()
     with open(edge_list_path, "w") as el:
         for tx, ty in sorted(band, key=lambda t: (t[1], t[0])):
             el.write(f"{tx},{ty}\n")
@@ -2123,7 +2243,6 @@ def apply_vignette_fade(
         flush=True,
     )
     # Drop dest tiles that sit fully past the vignette (all beige).
-    dest0 = dest / "0"
     removed_ext = 0
     for tx, ty in exterior:
         path = dest0 / f"{tx}_{ty}.webp"
@@ -2133,6 +2252,29 @@ def apply_vignette_fade(
         present.discard((tx, ty))
     if removed_ext:
         print(f"  removed {removed_ext} fully-exterior dest tiles", flush=True)
+
+    # Previously-faded tiles that the new field places in the deep
+    # interior must become unfaded clean content, not keep the old fade.
+    released = old_band - band - exterior
+    restored = 0
+    for tx, ty in released:
+        clean_path = clean_dest / "0" / f"{tx}_{ty}.webp"
+        dest_path = dest0 / f"{tx}_{ty}.webp"
+        if not clean_path.exists():
+            continue
+        with Image.open(clean_path) as im:
+            arr = np.asarray(im.convert("RGB"))
+        if _almost_empty(arr, pad_rgb):
+            if dest_path.exists():
+                dest_path.unlink(missing_ok=True)
+            present.discard((tx, ty))
+            restored += 1
+            continue
+        _atomic_save_webp(Image.fromarray(arr, "RGB"), dest_path, lossless=lossless_z0)
+        present.add((tx, ty))
+        restored += 1
+    if restored:
+        print(f"  restored {restored} tiles from clean (left the fade band)", flush=True)
 
     progress_path = progress_path or (dest / ".vignette-fade.jsonl")
     done = _load_progress(progress_path)
@@ -2161,6 +2303,10 @@ def apply_vignette_fade(
                 arr = np.empty((TILE, TILE, 3), dtype=np.uint8)
                 arr[:] = VIEW_FOG
             dist = upsample_distance(field, tx, ty, scale=scale)
+            if noise_amp > 0:
+                dist = dist + fade_boundary_noise(
+                    tx, ty, amplitude=noise_amp, period=noise_period,
+                )
             out, status = apply_coverage_fade(arr, dist, fade=fade, inset=inset, pad_rgb=pad_rgb)
             if status == "empty" or out is None or (out is not None and _almost_empty(out, pad_rgb)):
                 if existed:
@@ -2211,15 +2357,21 @@ def polish_vignette(
     blur: int = VIGNETTE_BLUR,
     open_r: int = VIGNETTE_OPEN,
     close_r: int = VIGNETTE_CLOSE,
+    dist_blur: float = VIGNETTE_DIST_BLUR,
+    noise_amp: float = VIGNETTE_NOISE,
+    noise_period: float = VIGNETTE_NOISE_PERIOD,
     lossless_z0: bool = True,
 ) -> set[tuple[int, int]]:
     """Rebuild the edge from source and apply one global beige vignette.
 
     Three resume-safe stages: a clean reslice into `.vignette-clean`
     (from district windows + water fill + land restore, never from dest),
-    a coarse signed-distance field with morphological cleanup
-    (`.vignette-dist.npz`), and the fade onto dest (`.vignette-fade.jsonl`).
-    Changing fade parameters discards only the field and fade progress;
+    a coarse signed-distance field with a wide blur, morphological
+    close/open, and a second blur on the distance itself
+    (`.vignette-dist.npz`), and the fade onto dest
+    (`.vignette-fade.jsonl`) with bicubic upsampling and a
+    low-frequency organic displacement of the isoline. Changing fade
+    or smoothing parameters discards only the field and fade progress;
     the clean staging is reused.
     """
     dest.mkdir(parents=True, exist_ok=True)
@@ -2235,7 +2387,10 @@ def polish_vignette(
             pad_rgb=pad_rgb, lossless_z0=lossless_z0,
         )
 
-    stamp = fade_stamp(fade, inset, scale, blur, open_r, close_r)
+    stamp = fade_stamp(
+        fade, inset, scale, blur, open_r, close_r,
+        dist_blur=dist_blur, noise_amp=noise_amp, noise_period=noise_period,
+    )
     stamp_path = dest / ".vignette-fade-stamp"
     dist_path = dest / ".vignette-dist.npz"
     fade_progress = dest / ".vignette-fade.jsonl"
@@ -2261,7 +2416,8 @@ def polish_vignette(
     if field is None:
         field = build_vignette_field(
             clean_dest, grid, scale=scale, fade=fade, inset=inset,
-            blur=blur, open_r=open_r, close_r=close_r, pad_rgb=pad_rgb,
+            blur=blur, open_r=open_r, close_r=close_r, dist_blur=dist_blur,
+            pad_rgb=pad_rgb,
         )
         np.savez_compressed(dist_path, field=field)
         print(f"  wrote {dist_path}", flush=True)
@@ -2272,6 +2428,7 @@ def polish_vignette(
         dest, grid, field, clean_dest,
         scale=scale, fade=fade, inset=inset, pad_rgb=pad_rgb,
         lossless_z0=lossless_z0, progress_path=fade_progress,
+        noise_amp=noise_amp, noise_period=noise_period,
     )
     return present
 
