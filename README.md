@@ -62,7 +62,7 @@ npm run all -- --city tinysz-full
 # 2. look at it
 cd ../tinyworlds-frontend
 npm install
-NEXT_PUBLIC_WORLD=tinysz npm run dev      # http://localhost:3000
+NEXT_PUBLIC_WORLD=tinysz-core npm run dev # http://localhost:3000 (Nanshan–Futian–Luohu)
 ```
 
 Other pipeline commands, still from `tinyworlds-pipeline/`:
@@ -112,8 +112,11 @@ node --max-old-space-size=4096 lora/render_full.mjs --out /tmp/tinysz-futian
 #    1024×1024 at high quality is US$0.0624 a window. Fog-skip on this box
 #    sent 190 of 465 windows, about US$11.86; 40 teacher tiles were
 #    US$2.50. A first attempt that invented a harbour was thrown away
-#    (US$1.25). All-in, about US$15.60. Do not restyle tinysz-full this way
-#    (thousands of dollars).
+#    (US$1.25). All-in, about US$15.60, including the teacher tiles.
+#    Nanshan at medium quality: 941 non-fog windows, US$50.25.
+#    Luohu at medium quality: 275 non-fog windows, US$14.685.
+#    A short medium-vs-high sample was US$0.49. Total so far: about US$81.03.
+#    Do not restyle tinysz-full this way (thousands of dollars).
 python3 lora/restyle_map.py \
   --chunks /tmp/tinysz-futian \
   --out /tmp/tinysz-futian-restyled \
@@ -144,15 +147,25 @@ python3 lora/water_constrain.py \
   --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
   --full /tmp/tinyshenzen-futian-restyled.png
 
-# 4. slice both pyramids into the viewer (generated tiles are gitignored)
+# 4. slice both pyramids into the viewer (generated tiles are gitignored).
+#    For the three-district core, slice tile-wise from each district's
+#    constrained windows so a full-size canvas is never decoded:
+#    python3 lora/slice_frontend.py --chunks /tmp/tinysz-core \
+#      --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
+#      --district /tmp/tinysz-nanshan:/tmp/tinysz-nanshan-restyled/tiles-constrained \
+#      --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
+#      --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
+#      --tilewise
+# Districts are reprojected from their own geo origin (Houhai, Caiwuwei)
+# into the core world's Civic Center origin.
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
   --out tinyworlds-frontend/public/data/tinysz \
   --restyle-dir tiles-restyled --procedural-dir tiles
 cd tinyworlds-pipeline && TINY_OUT=../tinyworlds-frontend/public/data \
-  npm run cli -- --city tinysz index
-cd ../tinyworlds-frontend && NEXT_PUBLIC_WORLD=tinysz npm run dev
+  npm run cli -- --city tinysz-core index
+cd ../tinyworlds-frontend && NEXT_PUBLIC_WORLD=tinysz-core npm run dev
 ```
 
 A single-window restyle of a preview still works through the pipeline CLI
