@@ -158,6 +158,18 @@ python3 lora/water_constrain.py \
 #      --tilewise
 # Districts are reprojected from their own geo origin (Houhai, Caiwuwei)
 # into the core world's Civic Center origin.
+#
+# After slicing, a free --polish pass feathers the dark renderer fog at
+# the map edge into the viewer's beige (no stair-stepped border at low
+# zoom) and fills blocky or missing bay water from the land/water mask
+# with a tone-matched sample. It never calls an API, and is resume-safe.
+# python3 lora/slice_frontend.py \
+#   --chunks /tmp/tinysz-core \
+#   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
+#   --district /tmp/tinysz-nanshan:/tmp/tinysz-nanshan-restyled/tiles-constrained \
+#   --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
+#   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
+#   --polish
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
