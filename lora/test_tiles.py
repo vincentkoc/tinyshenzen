@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL import Image
 
 import blend
+import restyle_map
 import prepare_dataset
 import tiles as T
 from tiles import Tile
@@ -91,6 +92,40 @@ class StitchTest(unittest.TestCase):
             self.assertFalse(mid in ((255, 0, 0), (0, 0, 255), (0, 0, 0)), mid)
 
 
+
+
+
+class FogSkipTest(unittest.TestCase):
+    def test_smooth_dark_image_is_fog_and_a_sharp_city_is_not(self):
+        dark = Image.new("RGB", (1024, 1024), (8, 8, 10))
+        self.assertTrue(restyle_map.is_mostly_fog(dark))
+        pale = Image.new("RGB", (1024, 1024), (0xE9, 0xE6, 0xDF))
+        self.assertTrue(restyle_map.is_mostly_fog(pale))
+        # coarse high-contrast blocks (a 4 px checkerboard would vanish at the 128 px metric)
+        city = Image.new("RGB", (1024, 1024), (200, 200, 190))
+        px = city.load()
+        for y in range(1024):
+            for x in range(1024):
+                if ((x // 32) + (y // 32)) % 2 == 0:
+                    px[x, y] = (40, 90, 160)
+        self.assertFalse(restyle_map.is_mostly_fog(city))
+        self.assertGreater(restyle_map.edge_energy(city), 8.0)
+        self.assertLess(restyle_map.edge_energy(dark), 1.0)
+
+    def test_composite_dark_fog_keeps_black_and_leaves_bright_restyle(self):
+        proc = Image.new("RGB", (64, 64), (8, 8, 8))
+        # right half is a bright "city" in the procedural image
+        for y in range(64):
+            for x in range(32, 64):
+                proc.putpixel((x, y), (160, 160, 150))
+        rest = Image.new("RGB", (64, 64), (0, 255, 0))  # invented green everywhere
+        out = restyle_map.composite_dark_fog(proc, rest, lum_max=48, feather=1)
+        # left (dark fog) stays near black, not green
+        l = out.getpixel((8, 32))
+        self.assertLess(l[1], 80, l)
+        # right (bright) takes the restyle
+        r = out.getpixel((56, 32))
+        self.assertGreater(r[1], 200, r)
 
 
 if __name__ == "__main__":

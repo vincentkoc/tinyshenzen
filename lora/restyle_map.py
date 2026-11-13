@@ -34,20 +34,38 @@ from blend import stitch_bands
 
 Image.MAX_IMAGE_PIXELS = None
 
-def is_mostly_fog(im: Image.Image, var_max: float = 250.0, mean_min: float = 170.0) -> bool:
-    """True for pale, low-contrast fog (or our empty #e9e6df fill). Parks are greener and darker."""
-    small = np.asarray(im.convert("RGB").resize((32, 32)), dtype=np.float32)
-    if float(small.var()) > var_max:
-        return False
-    return float(small.mean()) >= mean_min
-
-
-
 REPO = Path(__file__).resolve().parents[1]
 PIPELINE = REPO / "tinyworlds-pipeline"
 USAGE_RE = re.compile(
     r"restyle: usage\s+(\S+)\s+quality=(\S+)\s+text_in=(\d+)\s+image_in=(\d+)\s+image_out=(\d+)\s+~\$([0-9.]+)"
 )
+
+
+def edge_energy(im: Image.Image, size: int = 128) -> float:
+    """Mean absolute luminance gradient. Pixel-art city is sharp (~18–35); fog is smooth (~0–4)."""
+    lum = np.asarray(im.convert("L").resize((size, size)), dtype=np.float32)
+    dx = np.abs(np.diff(lum, axis=1, prepend=lum[:, :1]))
+    dy = np.abs(np.diff(lum, axis=0, prepend=lum[:1, :]))
+    return float((dx + dy).mean())
+
+
+def is_mostly_fog(im: Image.Image, edge_min: float = 8.0) -> bool:
+    """True for empty or smooth fog windows. Dark renderer fog is smooth; pavement and
+    buildings are sharp. A low threshold would send fog to the API, which invents a city."""
+    return edge_energy(im) < edge_min
+
+
+def composite_dark_fog(procedural: Image.Image, restyled: Image.Image, lum_max: float = 48.0, feather: int = 16) -> Image.Image:
+    """Keep the renderer's dark fog; use the restyle everywhere else (not on pale pavement)."""
+    from PIL import ImageFilter
+    proc = procedural.convert("RGB")
+    rest = restyled.convert("RGB").resize(proc.size, Image.Resampling.NEAREST)
+    lum = np.asarray(proc, dtype=np.float32).mean(axis=2)
+    core = (lum < lum_max).astype(np.uint8) * 255
+    w = np.asarray(Image.fromarray(core, "L").filter(ImageFilter.GaussianBlur(feather / 2)), dtype=np.float32) / 255.0
+    out = np.asarray(rest, dtype=np.float32) * (1 - w[:, :, None]) + np.asarray(proc, dtype=np.float32) * w[:, :, None]
+    return Image.fromarray(out.clip(0, 255).astype(np.uint8), "RGB")
+
 
 
 def load_meta(chunks: Path) -> dict:
@@ -186,6 +204,9 @@ def main() -> None:
                     Image.open(src).convert("RGB").save(dest)
                     return {"skipped": True, "fog": True, "usd": 0.0, "calls": 0, "x": t.x, "y": t.y, "path": str(dest)}
             result = restyle_one(src, dest, logs / f"{t.x}_{t.y}.log", args.look)
+            if dest.exists() and not result.get("fog"):
+                with Image.open(src) as proc, Image.open(dest) as rest:
+                    composite_dark_fog(proc, rest).save(dest)
             result["x"], result["y"] = t.x, t.y
             return result
 
