@@ -15,8 +15,12 @@ way. `--polish` is a free, no-API pass over already-sliced z0 tiles: it
 replaces the renderer's dark edge fog with feathered viewer fog so the
 zoomed-out map has no stair-stepped dark border, and fills blocky or
 missing bay-water from the land/water mask with a tone-matched sample
-(procedural water, shifted to the restyle teal). Higher zoom levels are
-then rebuilt with viewer-fog padding so missing children do not become
+(procedural water, shifted to the restyle teal). `--polish-edge` then
+restores land that the first pass washed out or dropped (tone-matched
+from the procedural layer) and fades the coverage edge with a single
+global signed-distance field, so the blend to viewer beige has no
+per-tile seams — including over open water. Higher zoom levels are
+rebuilt with viewer-fog padding so missing children do not become
 dark squares. Generated images are not committed.
 """
 
@@ -1176,6 +1180,523 @@ def polish_z0_tiles(
     return present
 
 
+# ---------------------------------------------------------------------------
+# Second polish: restore washed-out land, then a global distance-field fade
+# so the coverage edge has no per-tile seams.
+# ---------------------------------------------------------------------------
+
+COVERAGE_SCALE = 8
+EDGE_FADE = 128
+EDGE_INSET = 16
+
+
+def near_view_fog(arr: np.ndarray, tol: int = VIEW_FOG_TOL) -> np.ndarray:
+    rgb = arr[:, :, :3] if arr.ndim == 3 and arr.shape[2] == 4 else arr
+    fog_c = np.array(VIEW_FOG, dtype=np.int16)
+    return np.all(np.abs(rgb.astype(np.int16) - fog_c) <= tol, axis=2)
+
+
+def is_halo_residue(arr: np.ndarray) -> np.ndarray:
+    """Washed gray-green / near-beige fringe left by the per-tile edge feather.
+
+    The first polish blended dark fog toward viewer beige independently on
+    each tile, which left a low-chroma pale wash and a tile-aligned seam.
+    Those pixels are not solid city, water or forest.
+    """
+    rgb = arr[:, :, :3] if arr.ndim == 3 and arr.shape[2] == 4 else arr
+    vf = np.array(VIEW_FOG, dtype=np.float32)
+    dist = np.linalg.norm(rgb.astype(np.float32) - vf, axis=2)
+    chroma = rgb.max(axis=2).astype(np.float32) - rgb.min(axis=2).astype(np.float32)
+    lum = rgb.astype(np.float32).mean(axis=2)
+    close = dist < 36
+    pale_wash = (chroma < 18) & (lum > 170) & (dist < 90)
+    return close | pale_wash
+
+
+def core_content_mask(arr: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Solid city, water or land — not fog and not the washed edge halo."""
+    fog = dark_fog_mask(arr, pad_rgb)
+    view = near_view_fog(arr, tol=6)
+    halo = is_halo_residue(arr)
+    return ~fog & ~view & ~halo
+
+
+def chamfer_distance(seed: np.ndarray, max_r: int) -> np.ndarray:
+    """0 on `seed`, Euclidean-ish distance outside, capped at `max_r + 1`.
+
+    Two-neighbour relaxation, vectorised. Accurate up to `max_r` which is
+    all the fade band needs; farther pixels sit at the cap.
+    """
+    cap = np.float32(max_r + 1)
+    d = np.where(seed, np.float32(0.0), cap).astype(np.float32)
+    tmp = np.empty_like(d)
+    s2 = np.float32(1.41421356)
+    ones = np.float32(1.0)
+    for _ in range(int(max_r) + 1):
+        tmp[0, :] = cap
+        np.add(d[:-1, :], ones, out=tmp[1:, :])
+        np.minimum(d, tmp, out=d)
+        tmp[-1, :] = cap
+        np.add(d[1:, :], ones, out=tmp[:-1, :])
+        np.minimum(d, tmp, out=d)
+        tmp[:, 0] = cap
+        np.add(d[:, :-1], ones, out=tmp[:, 1:])
+        np.minimum(d, tmp, out=d)
+        tmp[:, -1] = cap
+        np.add(d[:, 1:], ones, out=tmp[:, :-1])
+        np.minimum(d, tmp, out=d)
+        # diagonals
+        tmp[0, :] = cap
+        tmp[:, 0] = cap
+        np.add(d[:-1, :-1], s2, out=tmp[1:, 1:])
+        np.minimum(d, tmp, out=d)
+        tmp[0, :] = cap
+        tmp[:, -1] = cap
+        np.add(d[:-1, 1:], s2, out=tmp[1:, :-1])
+        np.minimum(d, tmp, out=d)
+        tmp[-1, :] = cap
+        tmp[:, 0] = cap
+        np.add(d[1:, :-1], s2, out=tmp[:-1, 1:])
+        np.minimum(d, tmp, out=d)
+        tmp[-1, :] = cap
+        tmp[:, -1] = cap
+        np.add(d[1:, 1:], s2, out=tmp[:-1, :-1])
+        np.minimum(d, tmp, out=d)
+    return d
+
+
+def signed_distance_field(content: np.ndarray, max_r: int) -> np.ndarray:
+    """Negative inside `content`, positive outside, 0 on the boundary."""
+    d_out = chamfer_distance(content, max_r)
+    d_in = chamfer_distance(~content, max_r)
+    return d_out - d_in
+
+
+def smoothstep(x: np.ndarray, a: float, b: float) -> np.ndarray:
+    t = np.clip((x - a) / max(b - a, 1e-6), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def fade_alpha(signed_dist: np.ndarray, fade: int = EDGE_FADE, inset: int = EDGE_INSET) -> np.ndarray:
+    """0 deep inside content, 1 at `fade` pixels outside the core."""
+    return smoothstep(signed_dist, -float(inset), float(fade))
+
+
+def apply_coverage_fade(
+    arr: np.ndarray,
+    signed_dist: np.ndarray,
+    fade: int = EDGE_FADE,
+    inset: int = EDGE_INSET,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+) -> tuple[np.ndarray | None, str]:
+    """Blend `arr` toward viewer fog with a per-pixel signed distance (z0 px)."""
+    alpha = fade_alpha(signed_dist, fade, inset)
+    vf = np.array(VIEW_FOG, dtype=np.float32)
+    out = arr.astype(np.float32) * (1.0 - alpha[:, :, None]) + vf * alpha[:, :, None]
+    out = np.clip(out, 0, 255).astype(np.uint8)
+    if float(alpha.mean()) > 0.995 or _almost_empty(out, pad_rgb):
+        return None, "empty"
+    if float(alpha.max()) < 0.02:
+        return arr.copy(), "unchanged"
+    return out, "changed"
+
+
+def upsample_distance(
+    field: np.ndarray,
+    tx: int,
+    ty: int,
+    scale: int = COVERAGE_SCALE,
+    tile: int = TILE,
+    pad: int = 2,
+) -> np.ndarray:
+    """Bilinear upsample of the coarse field for one z0 tile, padded for continuity."""
+    h8 = tile // scale
+    w8 = tile // scale
+    ch, cw = field.shape
+    y0, x0 = ty * h8 - pad, tx * w8 - pad
+    y1, x1 = (ty + 1) * h8 + pad, (tx + 1) * w8 + pad
+    ya0, xa0 = max(0, y0), max(0, x0)
+    ya1, xa1 = min(ch, y1), min(cw, x1)
+    core = field[ya0:ya1, xa0:xa1]
+    if core.size == 0:
+        return np.full((tile, tile), float(EDGE_FADE + 1), dtype=np.float32)
+    top, left = ya0 - y0, xa0 - x0
+    bot, right = y1 - ya1, x1 - xa1
+    crop = np.pad(core, ((top, bot), (left, right)), mode="edge").astype(np.float32)
+    im = Image.fromarray(crop, mode="F")
+    up = im.resize(((x1 - x0) * scale, (y1 - y0) * scale), Image.Resampling.BILINEAR)
+    arr = np.array(up, dtype=np.float32)
+    off = pad * scale
+    return arr[off : off + tile, off : off + tile]
+
+
+def build_signed_distance(
+    dest: Path,
+    grid: dict,
+    *,
+    scale: int = COVERAGE_SCALE,
+    fade: int = EDGE_FADE,
+    inset: int = EDGE_INSET,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    erode: int = 1,
+    threshold: float = 0.4,
+) -> np.ndarray:
+    """Coarse signed-distance field, in z0-pixel units, from every z0 tile.
+
+    Each coarse cell is `scale` z0 pixels. Content is the fraction of
+    `core_content_mask` above `threshold`, then eroded by `erode` coarse
+    pixels so a washed halo at the rim does not count as the city edge.
+    """
+    cols, rows = grid["cols"], grid["rows"]
+    h8, w8 = TILE // scale, TILE // scale
+    ch, cw = rows * h8, cols * w8
+    acc = np.zeros((ch, cw), dtype=np.float32)
+    t0 = time.time()
+    n = 0
+    z0 = dest / "0"
+    for path in z0.glob("*.webp"):
+        stem = path.stem
+        if "_" not in stem:
+            continue
+        sx, sy = stem.split("_", 1)
+        try:
+            tx, ty = int(sx), int(sy)
+        except ValueError:
+            continue
+        if tx < 0 or ty < 0 or tx >= cols or ty >= rows:
+            continue
+        with Image.open(path) as im:
+            arr = np.asarray(im.convert("RGB"))
+        if arr.shape[0] != TILE or arr.shape[1] != TILE:
+            arr = np.array(Image.fromarray(arr).resize((TILE, TILE), Image.Resampling.NEAREST))
+        content = core_content_mask(arr, pad_rgb)
+        block = content[: h8 * scale, : w8 * scale].reshape(h8, scale, w8, scale).mean(axis=(1, 3))
+        acc[ty * h8 : (ty + 1) * h8, tx * w8 : (tx + 1) * w8] = block
+        n += 1
+        if n % 1000 == 0:
+            print(f"  coverage {n} tiles, {time.time() - t0:.1f}s", flush=True)
+    mask = acc >= threshold
+    if erode > 0:
+        d_in = chamfer_distance(~mask, erode + 1)
+        mask = mask & (d_in >= erode)
+    max_r = int(np.ceil((fade + inset) / scale) + 3)
+    print(f"  chamfer on {cw}×{ch} coarse grid, max_r={max_r}…", flush=True)
+    signed = signed_distance_field(mask, max_r)
+    signed *= np.float32(scale)
+    print(
+        f"  coverage field from {n} tiles, content frac={float(mask.mean()):.3f}, "
+        f"{time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return signed
+
+
+def procedural_painted(proc: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Pixels the renderer actually painted (land or water), not dark fog."""
+    return ~dark_fog_mask(proc, pad_rgb) & ~near_view_fog(proc, tol=4)
+
+
+def missing_or_washed(rest: np.ndarray, pad_rgb: tuple[int, int, int]) -> np.ndarray:
+    """Restyle pixels that should be replaced from the procedural layer."""
+    return dark_fog_mask(rest, pad_rgb) | near_view_fog(rest, tol=8) | is_halo_residue(rest)
+
+
+def tone_match_region(
+    proc: np.ndarray,
+    rest: np.ndarray,
+    need: np.ndarray,
+    sample: np.ndarray,
+) -> np.ndarray:
+    """Mean/std-match procedural pixels on `need` toward restyle `sample`."""
+    fill = proc.astype(np.float32)
+    if int(need.sum()) < 10:
+        return fill
+    if int(sample.sum()) >= 80:
+        src = proc[need].astype(np.float32)
+        dst = rest[sample].astype(np.float32)
+        mu_s, mu_d = src.mean(0), dst.mean(0)
+        shift = np.clip(mu_d - mu_s, -40.0, 40.0)
+        sd_s = np.maximum(src.std(0), 6.0)
+        sd_d = np.maximum(dst.std(0), 6.0)
+        ratio = np.clip(sd_d / sd_s, 0.5, 1.8)
+        adj = (fill - mu_s) * ratio + mu_s + shift
+        fill = np.where(need[:, :, None], adj, fill)
+    return np.clip(fill, 0, 255)
+
+
+def restore_from_procedural(
+    rest: np.ndarray,
+    proc: np.ndarray,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    feather: int = 16,
+) -> tuple[np.ndarray, int]:
+    """Fill washed or missing restyle pixels with tone-matched procedural content.
+
+    Land and water are matched separately. Good restyle is left alone; the
+    seam is feathered. Procedural dark fog is never copied.
+    """
+    import water_constrain as W
+
+    painted = procedural_painted(proc, pad_rgb)
+    if not painted.any():
+        return rest, 0
+    need = painted & missing_or_washed(rest, pad_rgb)
+    if not need.any():
+        return rest, 0
+    proc_water = W.looks_like_water(proc, require_smooth=False)
+    good = ~missing_or_washed(rest, pad_rgb)
+    fill = proc.astype(np.float32)
+    need_land = need & ~proc_water
+    need_water = need & proc_water
+    if need_land.any():
+        sample = good & ~W.looks_like_water(rest, require_smooth=False)
+        fill = tone_match_region(proc, rest, need_land, sample)
+    if need_water.any():
+        sample = good & W.looks_like_water(rest, require_smooth=False)
+        fill_w = tone_match_region(proc, rest, need_water, sample)
+        fill = np.where(need_water[:, :, None], fill_w, fill)
+    alpha = W.feather_alpha(need, radius=feather)
+    alpha = np.where(painted, alpha, 0.0).astype(np.float32)
+    # Keep a firm 1 on the hole itself; the feather only lives at the rim.
+    alpha = np.maximum(alpha, need.astype(np.float32))
+    # Do not overwrite solid restyle city (good & not in the feather rim).
+    # feather_alpha already decays outside `need`; good pixels only get the rim.
+    out = rest.astype(np.float32) * (1.0 - alpha[:, :, None]) + fill * alpha[:, :, None]
+    return np.clip(out, 0, 255).astype(np.uint8), int(need.sum())
+
+
+def _load_progress(path: Path) -> set[tuple[int, int]]:
+    done: set[tuple[int, int]] = set()
+    if not path.exists():
+        return done
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or "," not in line:
+            continue
+        try:
+            tx_s, ty_s = line.split(",", 1)
+            done.add((int(tx_s), int(ty_s)))
+        except ValueError:
+            continue
+    return done
+
+
+def restore_land_tiles(
+    dest: Path,
+    grid: dict,
+    proc_dest: Path,
+    *,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    lossless_z0: bool = True,
+    progress_path: Path | None = None,
+) -> set[tuple[int, int]]:
+    """Create or repair z0 tiles whose land (or water) was washed out or dropped."""
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    proc_present = present_from_disk(proc_dest, cols, rows) if proc_dest is not None else set()
+    to_visit = present | proc_present
+    progress_path = progress_path or (dest / ".polish2-land.jsonl")
+    done = _load_progress(progress_path)
+    if done:
+        print(f"  resuming land restore, {len(done)} tiles already done", flush=True)
+    dest0 = dest / "0"
+    dest0.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    changed = created = skipped = 0
+    px = 0
+    prog = open(progress_path, "a")
+    try:
+        for n, (tx, ty) in enumerate(sorted(to_visit, key=lambda t: (t[1], t[0])), 1):
+            if (tx, ty) in done:
+                continue
+            path = dest0 / f"{tx}_{ty}.webp"
+            existed = path.exists()
+            rest = None
+            if existed:
+                with Image.open(path) as im:
+                    rest = np.asarray(im.convert("RGB"))
+            else:
+                rest = np.zeros((TILE, TILE, 3), dtype=np.uint8)
+                rest[:] = VIEW_FOG
+            proc = None
+            if proc_dest is not None:
+                pp = proc_dest / "0" / f"{tx}_{ty}.webp"
+                if pp.exists():
+                    with Image.open(pp) as im:
+                        proc = np.asarray(im.convert("RGB"))
+            if proc is None:
+                prog.write(f"{tx},{ty}\n")
+                skipped += 1
+                if existed:
+                    present.add((tx, ty))
+                continue
+            out, n_px = restore_from_procedural(rest, proc, pad_rgb=pad_rgb)
+            px += n_px
+            if n_px == 0:
+                if existed:
+                    present.add((tx, ty))
+            else:
+                if _almost_empty(out, pad_rgb):
+                    if existed:
+                        path.unlink(missing_ok=True)
+                        present.discard((tx, ty))
+                else:
+                    _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=lossless_z0)
+                    present.add((tx, ty))
+                    if existed:
+                        changed += 1
+                    else:
+                        created += 1
+            prog.write(f"{tx},{ty}\n")
+            if n % 50 == 0:
+                prog.flush()
+            if n % 200 == 0 or n == len(to_visit):
+                print(
+                    f"  restore {n}/{len(to_visit)} changed={changed} created={created} "
+                    f"px={px} {time.time() - t0:.1f}s",
+                    flush=True,
+                )
+    finally:
+        prog.flush()
+        prog.close()
+    print(
+        f"  land restore done: present={len(present)} changed={changed} created={created} "
+        f"px={px}, {time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return present
+
+
+def apply_fade_tiles(
+    dest: Path,
+    grid: dict,
+    field: np.ndarray,
+    *,
+    scale: int = COVERAGE_SCALE,
+    fade: int = EDGE_FADE,
+    inset: int = EDGE_INSET,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    lossless_z0: bool = True,
+    progress_path: Path | None = None,
+) -> set[tuple[int, int]]:
+    """Apply the global distance fade to every z0 tile. Resume-safe."""
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    progress_path = progress_path or (dest / ".polish2-fade.jsonl")
+    done = _load_progress(progress_path)
+    if done:
+        print(f"  resuming edge fade, {len(done)} tiles already done", flush=True)
+    dest0 = dest / "0"
+    t0 = time.time()
+    changed = removed = 0
+    prog = open(progress_path, "a")
+    try:
+        tiles = sorted(present, key=lambda t: (t[1], t[0]))
+        for n, (tx, ty) in enumerate(tiles, 1):
+            if (tx, ty) in done:
+                continue
+            path = dest0 / f"{tx}_{ty}.webp"
+            if not path.exists():
+                present.discard((tx, ty))
+                prog.write(f"{tx},{ty}\n")
+                continue
+            with Image.open(path) as im:
+                arr = np.asarray(im.convert("RGB"))
+            dist = upsample_distance(field, tx, ty, scale=scale)
+            out, status = apply_coverage_fade(arr, dist, fade=fade, inset=inset, pad_rgb=pad_rgb)
+            if status == "empty" or out is None:
+                path.unlink(missing_ok=True)
+                present.discard((tx, ty))
+                removed += 1
+            elif status == "changed":
+                _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=lossless_z0)
+                changed += 1
+            prog.write(f"{tx},{ty}\n")
+            if n % 50 == 0:
+                prog.flush()
+            if n % 200 == 0 or n == len(tiles):
+                print(
+                    f"  fade {n}/{len(tiles)} changed={changed} removed={removed} "
+                    f"{time.time() - t0:.1f}s",
+                    flush=True,
+                )
+    finally:
+        prog.flush()
+        prog.close()
+    leftover = cleanup_absent_tiles(dest, present, cols, rows)
+    if leftover:
+        print(f"  removed {leftover} leftover z0 tiles after fade", flush=True)
+    print(
+        f"  fade done: present={len(present)} changed={changed} removed={removed}, "
+        f"{time.time() - t0:.1f}s",
+        flush=True,
+    )
+    return present
+
+
+def polish_smooth_edge(
+    dest: Path,
+    grid: dict,
+    *,
+    proc_dest: Path | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    fade: int = EDGE_FADE,
+    inset: int = EDGE_INSET,
+    scale: int = COVERAGE_SCALE,
+    lossless_z0: bool = True,
+) -> set[tuple[int, int]]:
+    """Restore washed-out land, then fade the coverage edge with a global field.
+
+    Three resume-safe stages: land restore (`.polish2-land.jsonl`), a
+    coarse signed-distance field (`.polish2-dist.npz`), and the fade
+    (`.polish2-fade.jsonl`). The field is in z0 pixels so neighbouring
+    tiles share one continuous alpha.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    land_done = dest / ".polish2-land-done"
+    if proc_dest is not None and (proc_dest / "0").is_dir():
+        if land_done.exists():
+            print("  land restore already complete, skipping", flush=True)
+            present = present_from_disk(dest, grid["cols"], grid["rows"])
+        else:
+            print(f"  restoring washed-out land from {proc_dest}", flush=True)
+            present = restore_land_tiles(dest, grid, proc_dest, pad_rgb=pad_rgb, lossless_z0=lossless_z0)
+            land_done.write_text("ok\n")
+    else:
+        present = present_from_disk(dest, grid["cols"], grid["rows"])
+
+    dist_path = dest / ".polish2-dist.npz"
+    field = None
+    if dist_path.exists():
+        try:
+            data = np.load(dist_path)
+            field = data["field"]
+            h8, w8 = TILE // scale, TILE // scale
+            expect = (grid["rows"] * h8, grid["cols"] * w8)
+            if field.shape != expect:
+                print(f"  cached field {field.shape} != {expect}, rebuilding", flush=True)
+                field = None
+            else:
+                print(f"  loaded cached coverage field {field.shape}", flush=True)
+        except (OSError, ValueError, KeyError) as exc:
+            print(f"  could not load cached field ({exc}), rebuilding", flush=True)
+            field = None
+    if field is None:
+        field = build_signed_distance(
+            dest, grid, scale=scale, fade=fade, inset=inset, pad_rgb=pad_rgb,
+        )
+        np.savez_compressed(dist_path, field=field)
+        print(f"  wrote {dist_path}", flush=True)
+
+    print(f"  applying global edge fade (fade={fade}px, inset={inset}px)", flush=True)
+    present = apply_fade_tiles(
+        dest, grid, field, scale=scale, fade=fade, inset=inset, pad_rgb=pad_rgb,
+        lossless_z0=lossless_z0,
+    )
+    return present
+
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas."""
     cols, rows = grid["cols"], grid["rows"]
@@ -1236,6 +1757,17 @@ def main() -> None:
         "--polish",
         action="store_true",
         help="feather dark edge fog to viewer fog and fill blocky bay water (free, no API)",
+    )
+    ap.add_argument(
+        "--polish-edge",
+        action="store_true",
+        help="restore washed-out land from the procedural layer, then fade the coverage edge with a global distance field (no tile seams)",
+    )
+    ap.add_argument(
+        "--fade",
+        type=int,
+        default=EDGE_FADE,
+        help=f"global edge-fade radius in z0 pixels (default {EDGE_FADE})",
     )
     ap.add_argument(
         "--pyramid-only",
@@ -1324,10 +1856,10 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.pyramid_only:
+    if args.polish or args.polish_edge or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
-            raise SystemExit(f"--polish/--pyramid-only needs existing z0 tiles at {dest / '0'}")
+            raise SystemExit(f"--polish/--polish-edge/--pyramid-only needs existing z0 tiles at {dest / '0'}")
         pdest = args.out / args.procedural_dir
         proc_dest = pdest if (pdest / "0").is_dir() else None
         if args.polish:
@@ -1338,6 +1870,14 @@ def main() -> None:
                 proc_dest=proc_dest,
                 pad_rgb=pad_rgb,
                 feather=args.feather,
+            )
+        elif args.polish_edge:
+            print(f"  smoothing coverage edge → {dest}", flush=True)
+            z0_present = polish_smooth_edge(
+                dest, grid,
+                proc_dest=proc_dest,
+                pad_rgb=pad_rgb,
+                fade=args.fade,
             )
         else:
             z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
