@@ -5,6 +5,7 @@ import { pipeline } from "node:stream/promises";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { USER_AGENT } from "../env.js";
 import type { DataSource, FetchContext } from "./types.js";
+import { loadExtensions } from "../duckdb.js";
 
 const BASE =
   "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_de_setores_censitarios__divisoes_intramunicipais/censo_2022/bairros/shp/UF";
@@ -29,7 +30,7 @@ export function ibgeBairros(opts: { uf: string; municipality: string }): DataSou
 
       const db = await DuckDBInstance.create(":memory:");
       const conn = await db.connect();
-      await conn.run("INSTALL spatial; LOAD spatial;");
+      await loadExtensions(conn, "spatial");
       const reader = await conn.runAndReadAll(
         `SELECT NM_BAIRRO, ST_AsGeoJSON(geom) FROM ST_Read('/vsizip/${zip.replaceAll("'", "''")}/${stem}.shp')
          WHERE CD_MUN = '${opts.municipality}' ORDER BY NM_BAIRRO`,

@@ -6,6 +6,7 @@ import { fromUrl } from "geotiff";
 import { USER_AGENT } from "../env.js";
 import { toUtm, utmEpsg, utmZone } from "../geom/utm.js";
 import type { DataSource, FetchContext } from "./types.js";
+import { loadExtensions } from "../duckdb.js";
 
 const BUCKET = "open-buildings-temporal-data";
 const HOST = "https://storage.googleapis.com";
@@ -17,13 +18,29 @@ const RESOLUTION = 4;
 const MIN_BUILDINGS = 400;
 const NODATA = 255;
 
-/** What `heights/index.json` holds. Tiles are rows of bytes, top row first: height in half metres, 255 = no data. */
+/** What `heights/index.json` holds. Tiles are rows of bytes, top row first. */
 export interface HeightIndex {
   zone: number;
   south: boolean;
   /** metres per pixel */
   res: number;
-  tiles: { file: string; x0: number; y1: number; width: number; height: number }[];
+  /**
+   * How to turn a raw raster reading into a building height. `open-buildings` (the default) applies
+   * the correction curve fitted to Google Open Buildings 2.5D. `identity` uses the metres as stored
+   * (CNBH-10m, which is already a height estimate in metres).
+   */
+  curve?: "open-buildings" | "identity";
+  tiles: {
+    file: string;
+    x0: number;
+    y1: number;
+    width: number;
+    height: number;
+    /** 1 (default): uint8, 255 = no data. 2: uint16 little-endian, 65535 = no data. */
+    bytes?: 1 | 2;
+    /** `half-metres` (default) or `metres`. */
+    unit?: "half-metres" | "metres";
+  }[];
 }
 
 interface Manifest {
@@ -81,7 +98,7 @@ export const openBuildings: DataSource = {
     // where the buildings are, in UTM
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
-    await conn.run("INSTALL spatial; LOAD spatial;");
+    await loadExtensions(conn, "spatial");
     const reader = await conn.runAndReadAll(
       `SELECT ST_X(ST_Centroid(geometry)), ST_Y(ST_Centroid(geometry))
        FROM '${path.join(ctx.rawDir, "building.parquet").replaceAll("'", "''")}'`,

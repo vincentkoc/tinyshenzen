@@ -27,6 +27,7 @@ import { LineSink, PolySink } from "./sinks.js";
 import { f32, u32, u8, writeScene } from "./store.js";
 import { R } from "../render/palette.js";
 import { chooseStyle, type Style } from "./styles.js";
+import { loadExtensions } from "../duckdb.js";
 
 /**
  * Raw open data → a scene: flat typed arrays in map pixels that the renderer can draw without
@@ -437,7 +438,7 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
 
   const db = await DuckDBInstance.create(":memory:");
   const conn = await db.connect();
-  await conn.run("INSTALL spatial; LOAD spatial;");
+  await loadExtensions(conn, "spatial");
 
   // ---- fog: where the map ends
   const fog: FogGrid = await cityFog(conn, proj);

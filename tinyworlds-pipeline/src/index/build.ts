@@ -13,6 +13,7 @@ import { buildSyntheticIndex } from "../scene/synthetic.js";
 import { stampIndexes } from "./stamp.js";
 import { writeSights } from "./write-sights.js";
 import type { Source } from "./sights.js";
+import { loadExtensions } from "../duckdb.js";
 
 /**
  * The viewer's indexes: what can be searched for (places.json), the outlines of the city's
@@ -238,7 +239,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
 
   const db = await DuckDBInstance.create(":memory:");
   const conn = await db.connect();
-  await conn.run("INSTALL spatial; LOAD spatial;");
+  await loadExtensions(conn, "spatial");
 
   const fog = await cityFog(conn, proj);
   /** Only things on the visible map are worth finding. */

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { OVERTURE_RELEASE } from "../env.js";
+import { loadExtensions } from "../duckdb.js";
 import type { DataSource, FetchContext } from "./types.js";
 
 /** Overture theme/type pairs copied to local Parquet, clipped to the city's bounding box. */
@@ -36,7 +37,8 @@ export const overture: DataSource = {
 
     const db = await DuckDBInstance.create(":memory:");
     const conn = await db.connect();
-    await conn.run("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-west-2';");
+    await loadExtensions(conn, "httpfs", "spatial");
+    await conn.run("SET s3_region='us-west-2';");
     const base = `s3://overturemaps-us-west-2/release/${OVERTURE_RELEASE}`;
     const { west, south, east, north } = ctx.bbox;
     const inBox = `bbox.xmin < ${east} AND bbox.xmax > ${west} AND bbox.ymin < ${north} AND bbox.ymax > ${south}`;

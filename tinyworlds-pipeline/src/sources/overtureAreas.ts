@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import type { DataSource, FetchContext } from "./types.js";
+import { loadExtensions } from "../duckdb.js";
 
 export interface OvertureAreasOptions {
   /** Corrects names the data has only in another script. */
@@ -45,7 +46,7 @@ export function overtureAreas(opts: OvertureAreasOptions = {}): DataSource {
       const file = path.join(ctx.rawDir, "division_area.parquet").replaceAll("'", "''");
       const db = await DuckDBInstance.create(":memory:");
       const conn = await db.connect();
-      await conn.run("INSTALL spatial; LOAD spatial;");
+      await loadExtensions(conn, "spatial");
       // the English name where the primary one is in another script; nothing as large as a county.
       // A district counts if it reaches into the box at all; a neighbourhood if its middle is inside.
       await conn.run(
