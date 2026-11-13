@@ -728,5 +728,185 @@ class BayWaterFillTest(unittest.TestCase):
 
 
 
+class SmoothEdgePolishTest(unittest.TestCase):
+    PAD = (0x1A, 0x1E, 0x1C)
+
+    def test_core_content_rejects_beige_fog_and_the_washed_halo(self):
+        city = np.full((16, 16, 3), (40, 120, 90), dtype=np.uint8)
+        self.assertTrue(SF.core_content_mask(city, self.PAD).all())
+        water = np.full((16, 16, 3), SF.RESTYLE_WATER, dtype=np.uint8)
+        self.assertTrue(SF.core_content_mask(water, self.PAD).all())
+        beige = np.full((16, 16, 3), SF.VIEW_FOG, dtype=np.uint8)
+        self.assertFalse(SF.core_content_mask(beige, self.PAD).any())
+        dark = np.full((16, 16, 3), (8, 10, 9), dtype=np.uint8)
+        self.assertFalse(SF.core_content_mask(dark, self.PAD).any())
+        # washed gray-green halo: a 50/50 blend of forest and viewer fog,
+        # pulled close to beige with low chroma
+        wash = np.full((16, 16, 3), (210, 208, 200), dtype=np.uint8)
+        self.assertFalse(SF.core_content_mask(wash, self.PAD).any())
+
+    def test_chamfer_and_signed_distance_signs(self):
+        seed = np.zeros((32, 32), dtype=bool)
+        seed[12:20, 12:20] = True
+        d = SF.chamfer_distance(seed, 10)
+        self.assertEqual(d[16, 16], 0)
+        self.assertAlmostEqual(float(d[12, 16]), 0.0, places=3)
+        self.assertGreater(float(d[10, 16]), 1.0)
+        self.assertLess(float(d[10, 16]), 3.0)
+        signed = SF.signed_distance_field(seed, 10)
+        self.assertLess(float(signed[16, 16]), 0)
+        self.assertGreater(float(signed[0, 0]), 0)
+        # magnitude at the far corner is capped, not zero
+        self.assertGreater(float(signed[0, 0]), 8)
+
+    def test_fade_alpha_is_zero_inside_and_one_past_the_radius(self):
+        dist = np.array([-40, -16, 0, 64, 128, 200], dtype=np.float32)
+        a = SF.fade_alpha(dist, fade=128, inset=16)
+        self.assertLess(float(a[0]), 0.02)
+        self.assertGreater(float(a[2]), 0.0)
+        self.assertLess(float(a[2]), 0.15)
+        self.assertAlmostEqual(float(a[4]), 1.0, places=3)
+        self.assertEqual(float(a[5]), 1.0)
+        # smoothstep is monotonic
+        self.assertTrue(np.all(np.diff(a) >= -1e-6))
+
+    def test_coverage_fade_turns_the_outside_beige_and_keeps_the_core(self):
+        arr = np.full((64, 64, 3), (40, 120, 90), dtype=np.uint8)
+        # signed dist: negative in a 32×32 centre, positive outside
+        yy, xx = np.ogrid[:64, :64]
+        signed = np.sqrt((xx - 32.0) ** 2 + (yy - 32.0) ** 2) - 16.0
+        out, status = SF.apply_coverage_fade(arr, signed, fade=16, inset=4, pad_rgb=self.PAD)
+        self.assertEqual(status, "changed")
+        core = out[30:34, 30:34]
+        self.assertGreater(int(core[:, :, 1].mean()), 80)
+        corner = out[0:4, 0:4]
+        self.assertTrue(np.all(np.abs(corner.astype(int) - SF.VIEW_FOG) <= 4))
+
+    def test_global_fade_is_continuous_across_a_tile_seam(self):
+        """Two neighbouring 512-px tiles sharing one coverage field meet at the seam."""
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "tiles"
+            (dest / "0").mkdir(parents=True)
+            # A circle of city centred on the vertical seam at x=512, y=256.
+            # Split into tile (0,0) and (1,0).
+            for tx in (0, 1):
+                img = np.full((512, 512, 3), SF.VIEW_FOG, dtype=np.uint8)
+                # also sprinkle a per-tile washed halo that would seam if faded locally
+                img[:] = (210, 208, 200)
+                yy, xx = np.ogrid[:512, :512]
+                world_x = xx + tx * 512
+                r = np.sqrt((world_x - 512.0) ** 2 + (yy - 256.0) ** 2)
+                img[r <= 180] = (40, 120, 90)
+                Image.fromarray(img, "RGB").save(dest / "0" / f"{tx}_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 2}
+            field = SF.build_signed_distance(
+                dest, grid, scale=8, fade=64, inset=8, pad_rgb=self.PAD, erode=0,
+            )
+            d0 = SF.upsample_distance(field, 0, 0, scale=8)
+            d1 = SF.upsample_distance(field, 1, 0, scale=8)
+            # Distance itself is continuous: adjacent pixel centres differ by ~1
+            seam = np.abs(d0[:, -1] - d1[:, 0])
+            self.assertLess(float(np.median(seam)), 2.5)
+            self.assertLess(float(seam.max()), 8.0)
+            left = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB"))
+            right = np.asarray(Image.open(dest / "0" / "1_0.webp").convert("RGB"))
+            out_l, _ = SF.apply_coverage_fade(left, d0, fade=64, inset=8, pad_rgb=self.PAD)
+            out_r, _ = SF.apply_coverage_fade(right, d1, fade=64, inset=8, pad_rgb=self.PAD)
+            self.assertIsNotNone(out_l)
+            self.assertIsNotNone(out_r)
+            # RGB at the shared edge is nearly identical — no tile-aligned jump
+            jump = np.abs(out_l[:, -1].astype(int) - out_r[:, 0].astype(int)).mean()
+            self.assertLess(float(jump), 8.0, jump)
+            # The washed halo outside the circle became viewer fog, not gray blocks
+            # A far corner of the left tile (no circle) is beige
+            self.assertTrue(
+                np.all(np.abs(out_l[10:20, 10:20].astype(int) - SF.VIEW_FOG) <= 8)
+            )
+
+    def test_restore_fills_beige_holes_with_toned_procedural_land(self):
+        rest = np.full((64, 64, 3), (40, 110, 80), dtype=np.uint8)
+        rest[16:48, 16:48] = SF.VIEW_FOG  # a washed hole
+        proc = np.full((64, 64, 3), (50, 130, 70), dtype=np.uint8)
+        # procedural fog around the outside must not be copied
+        proc[0:4, :] = (6, 7, 6)
+        out, n = SF.restore_from_procedural(rest, proc, pad_rgb=self.PAD, feather=4)
+        self.assertGreater(n, 30 * 30)
+        # hole is now land, green, not beige
+        hole = out[24:40, 24:40]
+        self.assertGreater(int(hole[:, :, 1].mean()), 80)
+        self.assertFalse(np.all(np.abs(hole.astype(int) - SF.VIEW_FOG) <= 6))
+        # good restyle around the hole is still the original city colour
+        rim = out[2:8, 2:8]
+        self.assertTrue(np.allclose(rim, (40, 110, 80), atol=2))
+        # procedural dark fog was not painted into the restyle
+        self.assertTrue(np.allclose(out[0:4, 8:16], (40, 110, 80), atol=2))
+
+    def test_restore_does_not_copy_procedural_fog_into_an_empty_tile(self):
+        rest = np.full((32, 32, 3), SF.VIEW_FOG, dtype=np.uint8)
+        proc = np.full((32, 32, 3), (8, 10, 9), dtype=np.uint8)  # all dark fog
+        out, n = SF.restore_from_procedural(rest, proc, pad_rgb=self.PAD, feather=2)
+        self.assertEqual(n, 0)
+        self.assertTrue(np.allclose(out, rest))
+
+    def test_restore_land_tiles_creates_a_missing_tile_from_procedural(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            restyle = root / "restyle"
+            proc = root / "proc"
+            (restyle / "0").mkdir(parents=True)
+            (proc / "0").mkdir(parents=True)
+            # missing restyle cell, procedural has a green hill
+            Image.new("RGB", (512, 512), (45, 120, 60)).save(proc / "0" / "2_1.webp", "WEBP")
+            # a good city tile is left alone
+            Image.new("RGB", (512, 512), (80, 130, 100)).save(restyle / "0" / "0_0.webp", "WEBP")
+            Image.new("RGB", (512, 512), (80, 130, 100)).save(proc / "0" / "0_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 8, "rows": 8}
+            present = SF.restore_land_tiles(
+                restyle, grid, proc, pad_rgb=self.PAD,
+                progress_path=root / "land.jsonl",
+            )
+            self.assertIn((2, 1), present)
+            self.assertTrue((restyle / "0" / "2_1.webp").exists())
+            hill = np.asarray(Image.open(restyle / "0" / "2_1.webp").convert("RGB"))
+            self.assertGreater(int(hill[:, :, 1].mean()), 80)
+            city = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            self.assertGreater(int(city[10, 10, 1]), 100)
+
+    def test_polish_smooth_edge_restores_then_fades_without_a_seam(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            restyle = root / "restyle"
+            proc = root / "proc"
+            (restyle / "0").mkdir(parents=True)
+            (proc / "0").mkdir(parents=True)
+            # 2×1 tiles. Procedural is a green half-plane (y > 200) across both.
+            # Restyle has the green on tile 0 only; tile 1 is missing (washed out).
+            green = (40, 120, 70)
+            for tx in (0, 1):
+                pimg = np.full((512, 512, 3), (8, 10, 9), dtype=np.uint8)
+                pimg[200:, :] = green
+                Image.fromarray(pimg, "RGB").save(proc / "0" / f"{tx}_0.webp", "WEBP")
+            r0 = np.full((512, 512, 3), SF.VIEW_FOG, dtype=np.uint8)
+            r0[200:, :] = green
+            Image.fromarray(r0, "RGB").save(restyle / "0" / "0_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 2}
+            present = SF.polish_smooth_edge(
+                restyle, grid, proc_dest=proc, pad_rgb=self.PAD, fade=48, inset=8,
+            )
+            self.assertIn((0, 0), present)
+            self.assertIn((1, 0), present)
+            left = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
+            right = np.asarray(Image.open(restyle / "0" / "1_0.webp").convert("RGB"))
+            # restored land on the right is green, not beige, in the solid interior
+            self.assertGreater(int(right[400, 256, 1]), 70)
+            # seam in the solid interior (well inside the half-plane)
+            jump = np.abs(left[400, -1].astype(int) - right[400, 0].astype(int)).mean()
+            self.assertLess(float(jump), 10.0, jump)
+            # far above the half-plane (procedural fog) is viewer beige, not dark
+            self.assertTrue(np.all(np.abs(left[20, 20].astype(int) - SF.VIEW_FOG) <= 8))
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
