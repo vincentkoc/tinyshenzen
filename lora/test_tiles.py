@@ -237,6 +237,39 @@ class WaterConstrainTest(unittest.TestCase):
 
 
 
+    def test_harmonize_shifts_flat_beige_toward_restyle_land(self):
+        proc = self._rgb(96, 96, (0xE0, 0xD8, 0xC8))
+        rest = Image.new("RGB", (96, 96), (0xC8, 0xBE, 0xA8))  # restyle pale ground
+        # left half invented water, right half already restyle land
+        for y in range(96):
+            for x in range(48):
+                rest.putpixel((x, y), (0x2F, 0x6D, 0x58))
+        mask = Image.new("L", (96, 96), 0)
+        out, report = W.constrain(proc, rest, mask, feather=1, origin=(0, 0), strip_rooftops=False)
+        self.assertGreater(report["false_water"], 40 * 96)
+        left = out.getpixel((16, 48))
+        right = out.getpixel((80, 48))
+        self.assertEqual(right, (0xC8, 0xBE, 0xA8))
+        # patched land is closer to the restyle ground than to raw procedural beige
+        def dist(a, b):
+            return sum((a[i] - b[i]) ** 2 for i in range(3))
+        self.assertLess(dist(left, (0xC8, 0xBE, 0xA8)), dist(left, (0xE0, 0xD8, 0xC8)))
+
+    def test_invented_rooftop_garden_is_restored_to_procedural_roof(self):
+        proc = self._rgb(80, 80, (0xB0, 0xAE, 0xA8))  # concrete roof
+        rest = self._rgb(80, 80, (0xB0, 0xAE, 0xA8))
+        for y in range(20, 60):
+            for x in range(20, 60):
+                rest.putpixel((x, y), (0x3A, 0x8A, 0x48))  # invented garden
+        mask = Image.new("L", (80, 80), 0)
+        out, report = W.constrain(proc, rest, mask, feather=1, harmonize=False)
+        self.assertGreater(report["rooftops"], 30 * 30)
+        mid = out.getpixel((40, 40))
+        self.assertGreater(mid[0], 140, mid)
+        self.assertLess(abs(mid[0] - mid[1]), 20, mid)
+
+
+
 class SliceFrontendTest(unittest.TestCase):
     def test_futian_grid_matches_pipeline(self):
         # minX -11950, minY -6000, maxX 11550, maxY 5175

@@ -156,15 +156,97 @@ def large_regions(binary: np.ndarray, min_size: int = 200) -> np.ndarray:
     return out.reshape(h, w)
 
 
+
+def is_pale_ground(rgb: np.ndarray) -> np.ndarray:
+    """Warm pale pavement or empty lots — not grass, water, fog or glass."""
+    hue, sat, val = rgb_to_hsv(rgb)
+    warm = (sat < 0.08) | ((sat < 0.18) & ((hue < 70) | (hue > 300)))
+    return warm & (val >= 0.52) & (val <= 0.92)
+
+
+def hash_grain(origin: tuple[int, int], h: int, w: int) -> np.ndarray:
+    """Smooth, tile-seamless 2-px grain in map coordinates, values in about [-1, 1]."""
+    oy, ox = origin[1], origin[0]
+    yy = np.arange(h, dtype=np.int64) + oy
+    xx = np.arange(w, dtype=np.int64) + ox
+    # 2-px pixel-art cells
+    cy = yy // 2
+    cx = xx[None, :]
+    cy = cy[:, None]
+    v = np.uint32(cy * 374761393 + cx * 668265263)
+    v = (v ^ (v >> 13)) * np.uint32(1274126177)
+    n = (v & np.uint32(0xFFFF)).astype(np.float32) / 32767.5 - 1.0
+    # a second octave, 4-px, for slower variation
+    v2 = np.uint32((cy // 2) * 144890729 + (cx // 2) * 22695477)
+    v2 = (v2 ^ (v2 >> 11)) * np.uint32(1597334677)
+    n2 = (v2 & np.uint32(0xFFFF)).astype(np.float32) / 32767.5 - 1.0
+    return (0.65 * n + 0.35 * n2).astype(np.float32)
+
+
+def harmonize_fill(
+    proc: np.ndarray,
+    rest: np.ndarray,
+    fix: np.ndarray,
+    origin: tuple[int, int] = (0, 0),
+) -> np.ndarray:
+    """Tone-match and grain patched open land so it sits with the restyle, not as flat beige."""
+    fill = proc.astype(np.float32)
+    proc_land = is_pale_ground(proc)
+    rest_land = is_pale_ground(rest) & (edge_map(rest) < 18)
+    target = fix & proc_land
+    if int(target.sum()) < 50:
+        return fill
+    # Prefer restyle pale ground just outside the patch; fall back to any in the window.
+    grown = Image.fromarray(target.astype(np.uint8) * 255, "L")
+    for _ in range(8):
+        grown = grown.filter(ImageFilter.MaxFilter(7))
+    ring = (np.asarray(grown) > 127) & rest_land & ~fix
+    if int(ring.sum()) < 200:
+        ring = rest_land
+    if int(ring.sum()) < 80:
+        return fill
+    src = proc[target].astype(np.float32)
+    dst = rest[ring].astype(np.float32)
+    mu_s = src.mean(0)
+    sd_s = np.maximum(src.std(0), 4.0)
+    mu_d = dst.mean(0)
+    sd_d = np.maximum(dst.std(0), 4.0)
+    scale = np.clip(sd_d / sd_s, 0.85, 1.6)
+    matched = (proc.astype(np.float32) - mu_s) * scale + mu_d
+    grain = hash_grain(origin, proc.shape[0], proc.shape[1])
+    textured = matched + grain[..., None] * np.minimum(sd_d, 16.0) * 0.55
+    textured = np.clip(textured, 0, 255)
+    return np.where(target[..., None], textured, fill)
+
+
+def is_vegetation(rgb: np.ndarray) -> np.ndarray:
+    hue, sat, val = rgb_to_hsv(rgb)
+    return (hue >= 70) & (hue <= 165) & (sat >= 0.22) & (val >= 0.18) & (val <= 0.82)
+
+
+def is_built_surface(rgb: np.ndarray) -> np.ndarray:
+    """Roofs and walls in the procedural image: concrete, glass, terracotta — not parks."""
+    hue, sat, val = rgb_to_hsv(rgb)
+    terracotta = (hue <= 50) & (sat >= 0.18) & (val >= 0.25) & (val <= 0.9)
+    concrete = (sat <= 0.14) & (val >= 0.28) & (val <= 0.88)
+    glass = (hue >= 155) & (hue <= 215) & (sat >= 0.12) & (val >= 0.25)
+    return (terracotta | concrete | glass) & ~is_vegetation(rgb)
+
+
 def constrain(
     procedural: Image.Image,
     restyled: Image.Image,
     mask: Image.Image | np.ndarray,
     feather: int = FEATHER,
     min_region: int = 200,
+    origin: tuple[int, int] = (0, 0),
+    harmonize: bool = True,
+    strip_rooftops: bool = True,
 ) -> tuple[Image.Image, dict]:
     """Composite procedural pixels over false water and missing water. Returns the
-    image and a small report (pixel counts)."""
+    image and a small report (pixel counts). Open land is tone-matched to the
+    restyle so the patch is not a flat beige sheet. Invented rooftop gardens
+    (greenery on a procedural roof) are put back to the procedural roof."""
     proc = np.asarray(procedural.convert("RGB"))
     rest = np.asarray(restyled.convert("RGB"))
     if proc.shape != rest.shape:
@@ -185,15 +267,29 @@ def constrain(
     rest_edge = edge_map(rest)
     missing_water = gt & ~rest_water & (rest_edge <= EDGE_MAX * 2.5)
     missing_water = large_regions(missing_water, min_region)
-    fix = false_water | missing_water
+    rooftops = np.zeros(proc.shape[:2], dtype=bool)
+    if strip_rooftops:
+        rooftops = large_regions(
+            is_vegetation(rest) & is_built_surface(proc) & ~is_vegetation(proc),
+            min_size=max(40, min_region // 4),
+        )
+    fix = false_water | missing_water | rooftops
     alpha = feather_alpha(fix, feather)
-    out = rest.astype(np.float32) * (1.0 - alpha[..., None]) + proc.astype(np.float32) * alpha[..., None]
+    fill = proc.astype(np.float32)
+    if harmonize:
+        fill = harmonize_fill(proc, rest, false_water, origin=origin)
+    # rooftops and missing water always use the procedural pixels
+    if rooftops.any() or missing_water.any():
+        roof_or_miss = rooftops | missing_water
+        fill = np.where(roof_or_miss[..., None], proc.astype(np.float32), fill)
+    out = rest.astype(np.float32) * (1.0 - alpha[..., None]) + fill * alpha[..., None]
     image = Image.fromarray(np.clip(out, 0, 255).astype(np.uint8), "RGB")
     n = int(proc.shape[0] * proc.shape[1])
     report = {
         "pixels": n,
         "false_water": int(false_water.sum()),
         "missing_water": int(missing_water.sum()),
+        "rooftops": int(rooftops.sum()),
         "fixed": int(fix.sum()),
         "frac": float(fix.sum()) / n if n else 0.0,
         "gt_water": int(gt.sum()),
@@ -254,7 +350,7 @@ def main() -> None:
             with Image.open(proc_path) as proc, Image.open(rest_path) as rest:
                 proc = proc.convert("RGB").resize((t.w, t.h), Image.Resampling.NEAREST)
                 rest = rest.convert("RGB").resize((t.w, t.h), Image.Resampling.NEAREST)
-                out, report = constrain(proc, rest, mask, feather=args.feather)
+                out, report = constrain(proc, rest, mask, feather=args.feather, origin=(t.x, t.y))
             out.save(out_path)
             report.update({"x": t.x, "y": t.y, "path": str(out_path)})
             reports.append(report)

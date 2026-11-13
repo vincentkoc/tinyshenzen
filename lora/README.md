@@ -65,30 +65,39 @@ python3 lora/restyle_map.py \
 
 The restyle can invent rivers on pale land (and sometimes pave over real
 water). `render_water_mask.mjs` paints the scene's ground kinds the same way
-the chunk renderer does, and `water_constrain.py` composites the procedural
-pixels back — with a feathered edge — wherever the restyle shows water on
-land, or land on real water. Glass is left alone because it is already teal
-in the procedural image. This is free: it does not call the API.
+the chunk renderer does, and `water_constrain.py` composites a tone-matched
+fill — with a feathered edge — wherever the restyle shows water on land,
+or the procedural pixels wherever it paved over real water. Open land is
+harmonized to nearby restyle ground so the patch is not a flat beige sheet.
+Invented rooftop gardens on built roofs are restored to the procedural roof.
+Glass is left alone because it is already teal in the procedural image.
+This is free: it does not call the API.
 
 ```bash
 node --max-old-space-size=4096 lora/render_water_mask.mjs \
   --out /workspace/tinysz-futian/water_mask.png
 python3 lora/water_constrain.py \
+  --chunks /workspace/tinysz-futian \
+  --restyled /workspace/tinysz-futian-restyled \
   --mask /workspace/tinysz-futian/water_mask.png \
   --preview /workspace/tinyshenzen-futian-restyled-preview.jpg \
   --full /workspace/tinyshenzen-futian-restyled.png
 ```
 
 To put the constrained stitch into the viewer, slice it onto the same 512-px
-grid `makeGrid` uses (`origin` −12288,−6144 for the Futian test box). The
-restyle is the default layer; when a procedural pyramid is also written, the
-settings panel can switch.
+grid `makeGrid` uses (`origin` −12288,−6144 for the Futian test box). Write
+both pyramids so Settings can switch. Then re-run `index` with
+`TINY_OUT` pointing at the viewer's data dir so the restyle field and place
+indexes stay on the manifest.
 
 ```bash
 python3 lora/slice_frontend.py \
   --image /workspace/tinyshenzen-futian-restyled.png \
+  --chunks /workspace/tinysz-futian \
   --out tinyworlds-frontend/public/data/tinysz \
-  --restyle-dir tiles --skip-procedural
+  --restyle-dir tiles-restyled --procedural-dir tiles
+cd tinyworlds-pipeline && TINY_OUT=../tinyworlds-frontend/public/data \
+  npm run cli -- --city tinysz index
 ```
 
 Generated images are not committed (`public/data/` is gitignored).
