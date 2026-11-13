@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 import blend
@@ -362,6 +363,135 @@ class RestyleMapShardTest(unittest.TestCase):
             self.assertEqual(result["calls"], 0)
             self.assertEqual(result["usd"], 0.0)
 
+
+
+
+class DistrictOriginTest(unittest.TestCase):
+    def test_same_geo_is_a_pure_translation_of_zero(self):
+        geo = {"lon0": 114.0683, "lat0": 22.5455, "betaDeg": 0, "k": 2}
+        dmeta = {"origin": {"x": -11950, "y": -6000}, "geo": geo}
+        wx, wy, dx, dy = SF.district_world_origin(dmeta, geo)
+        self.assertEqual((wx, wy), (-11950, -6000))
+        self.assertEqual((dx, dy), (0.0, 0.0))
+
+    def test_nanshan_houhai_origin_moves_into_civic_center_space(self):
+        world = {"lon0": 114.0683, "lat0": 22.5455, "betaDeg": 0, "k": 2}
+        dmeta = {
+            "origin": {"x": -23850, "y": -11975},
+            "geo": {"lon0": 113.94167, "lat0": 22.51694, "betaDeg": 0, "k": 2},
+        }
+        wx, wy, dx, dy = SF.district_world_origin(dmeta, world)
+        self.assertEqual((wx, wy), (-56211, -21804))
+        self.assertAlmostEqual(dx, -32360.51, places=1)
+        self.assertAlmostEqual(dy, -9828.79, places=1)
+        # Shekou (113.916, 22.485) in world space sits inside this canvas,
+        # not at the untranslated local origin the first slicer used.
+        sx, sy = SF.to_map(world, 113.916, 22.485)
+        self.assertTrue(-56211 < sx < -56211 + 60950, sx)
+        self.assertTrue(-21804 < sy < -21804 + 30600, sy)
+        # The untranslated placement would put Shekou around (-12377, 915),
+        # many kilometres east of its real world position.
+        self.assertLess(sx, -30000)
+
+    def test_luohu_caiwuwei_origin_moves_east_of_civic_center(self):
+        world = {"lon0": 114.0683, "lat0": 22.5455, "betaDeg": 0, "k": 2}
+        dmeta = {
+            "origin": {"x": -8650, "y": -5175},
+            "geo": {"lon0": 114.10194, "lat0": 22.54667, "betaDeg": 0, "k": 2},
+        }
+        wx, wy, dx, dy = SF.district_world_origin(dmeta, world)
+        self.assertEqual((wx, wy), (-1480, -1850))
+        self.assertAlmostEqual(dx, 7169.65, places=1)
+        self.assertAlmostEqual(dy, 3324.63, places=1)
+
+    def test_pack_round_trips(self):
+        present = {(0, 0), (3, 0), (1, 2), (7, 3)}
+        b64 = SF.pack_bits(present, 8, 4)
+        self.assertEqual(SF.unpack_bits(b64, 8, 4), present)
+
+
+class BeigeCompositeTest(unittest.TestCase):
+    PAD = (0x1A, 0x1E, 0x1C)
+
+    def test_empty_mask_catches_viewer_fog_and_dark_fog(self):
+        beige = Image.new("RGB", (8, 8), SF.VIEW_FOG)
+        self.assertTrue(SF.empty_mask(np.asarray(beige), self.PAD).all())
+        dark = Image.new("RGB", (8, 8), (10, 12, 14))
+        self.assertTrue(SF.empty_mask(np.asarray(dark), self.PAD).all())
+        city = Image.new("RGB", (8, 8), (40, 120, 90))
+        self.assertFalse(SF.empty_mask(np.asarray(city), self.PAD).any())
+
+    def test_later_districts_beige_edge_does_not_erase_a_neighbour(self):
+        # Futian-like city, then a Luohu-like window that is viewer-fog beige
+        # on the overlapping half — the civic-center bug.
+        city = Image.new("RGB", (32, 32), (40, 110, 90))
+        for y in range(32):
+            for x in range(32):
+                city.putpixel((x, y), (40 + x, 110, 90 + y // 2))
+        incoming = Image.new("RGB", (32, 32), SF.VIEW_FOG)
+        for y in range(16, 32):
+            for x in range(32):
+                incoming.putpixel((x, y), (180, 90, 70))  # real Luohu content
+        out = SF.composite_district(city, incoming, self.PAD)
+        pix = out.load()
+        # top half stays Futian, not beige
+        self.assertNotEqual(pix[8, 4], SF.VIEW_FOG)
+        self.assertEqual(pix[8, 4], city.getpixel((8, 4)))
+        # bottom half takes Luohu's real content
+        self.assertEqual(pix[8, 20], (180, 90, 70))
+
+    def test_almost_empty_rejects_a_uniform_beige_tile(self):
+        beige = np.asarray(Image.new("RGB", (16, 16), SF.VIEW_FOG))
+        self.assertTrue(SF._almost_empty(beige, self.PAD))
+        city = np.zeros((16, 16, 3), dtype=np.uint8)
+        city[:] = SF.VIEW_FOG
+        city[4:12, 4:12] = (40, 120, 90)
+        self.assertFalse(SF._almost_empty(city, self.PAD))
+
+    def test_pyramid_ignores_leftover_children_not_in_present(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "tiles"
+            (dest / "0").mkdir(parents=True)
+            # a real city tile at 0,0 and a stale leftover at 1,0
+            Image.new("RGB", (512, 512), (40, 110, 90)).save(dest / "0" / "0_0.webp", "WEBP")
+            Image.new("RGB", (512, 512), (255, 0, 0)).save(dest / "0" / "1_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 4}
+            present = {0: {(0, 0)}}
+            levels = SF._pyramid_from_z0(dest, grid, present, self.PAD)
+            self.assertIn((0, 0), SF.unpack_bits(levels[0]["tiles"], 4, 4))
+            self.assertNotIn((1, 0), SF.unpack_bits(levels[0]["tiles"], 4, 4))
+            # z1 parent 0,0 is built only from 0,0 — leftover 1,0 is ignored
+            self.assertTrue((dest / "1" / "0_0.webp").exists())
+            parent = Image.open(dest / "1" / "0_0.webp")
+            arr = np.asarray(parent.convert("RGB"))
+            # the right half would be red if the leftover child had been used
+            self.assertFalse((np.abs(arr[:, 256:].astype(int) - (255, 0, 0)) < 10).all())
+
+    def test_fill_gaps_copies_procedural_into_missing_restyle_cells(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            restyle = root / "restyle"
+            proc = root / "proc"
+            (restyle / "0").mkdir(parents=True)
+            (proc / "0").mkdir(parents=True)
+            Image.new("RGB", (512, 512), (40, 110, 90)).save(restyle / "0" / "1_1.webp", "WEBP")
+            Image.new("RGB", (512, 512), (10, 20, 15)).save(proc / "0" / "1_1.webp", "WEBP")
+            Image.new("RGB", (512, 512), (12, 22, 18)).save(proc / "0" / "2_3.webp", "WEBP")
+            # a procedural tile outside the (smaller) grid must not be copied
+            Image.new("RGB", (512, 512), (1, 2, 3)).save(proc / "0" / "20_20.webp", "WEBP")
+            # viewer-fog beige is empty page, not city and not dark edge fog
+            Image.new("RGB", (512, 512), SF.VIEW_FOG).save(proc / "0" / "3_3.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 8, "rows": 8}
+            present = SF.fill_gaps_from_procedural(restyle, proc, grid, {(1, 1)}, self.PAD)
+            self.assertEqual(present, {(1, 1), (2, 3)})
+            self.assertTrue((restyle / "0" / "2_3.webp").exists())
+            self.assertFalse((restyle / "0" / "20_20.webp").exists())
+            self.assertFalse((restyle / "0" / "3_3.webp").exists())
+            # existing restyle is not overwritten by the procedural copy
+            arr = np.asarray(Image.open(restyle / "0" / "1_1.webp").convert("RGB"))
+            proc = np.asarray(Image.open(proc / "0" / "1_1.webp").convert("RGB"))
+            self.assertFalse(np.allclose(arr, proc, atol=5))
+            self.assertGreater(int(arr[0, 0, 1]), 80)
 
 
 
