@@ -1104,6 +1104,7 @@ class VignettePolishTest(unittest.TestCase):
             present = SF.polish_vignette(
                 restyle, grid, [d], proc_dest=proc, clean_dest=clean,
                 pad_rgb=self.PAD, fade=96, inset=8, scale=16, blur=2, open_r=1, close_r=2,
+                dist_blur=0, noise_amp=0,
             )
             self.assertIn((0, 0), present)
             self.assertIn((1, 0), present)
@@ -1129,6 +1130,7 @@ class VignettePolishTest(unittest.TestCase):
             present2 = SF.polish_vignette(
                 restyle, grid, [d], proc_dest=proc, clean_dest=clean,
                 pad_rgb=self.PAD, fade=96, inset=8, scale=16, blur=2, open_r=1, close_r=2,
+                dist_blur=0, noise_amp=0,
             )
             left2 = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
             self.assertEqual(set(present2), set(present))
@@ -1150,11 +1152,13 @@ class VignettePolishTest(unittest.TestCase):
             SF.polish_vignette(
                 restyle, grid, [d], clean_dest=clean,
                 pad_rgb=self.PAD, fade=48, inset=8, scale=16, blur=1, open_r=0, close_r=1,
+                dist_blur=0, noise_amp=0,
             )
             first = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
             SF.polish_vignette(
                 restyle, grid, [d], clean_dest=clean,
                 pad_rgb=self.PAD, fade=160, inset=8, scale=16, blur=1, open_r=0, close_r=1,
+                dist_blur=0, noise_amp=0,
             )
             second = np.asarray(Image.open(restyle / "0" / "0_0.webp").convert("RGB"))
             # Deep inside the green half stays green (not washed twice).
@@ -1169,6 +1173,122 @@ class VignettePolishTest(unittest.TestCase):
             self.assertFalse(np.array_equal(first, second))
 
 
+
+    def test_wider_smooth_rounds_a_full_tile_stair(self):
+        # One z0 tile at scale 16 is 32 coarse cells. The default wider
+        # blur and close must turn a 32-cell stair into a rounded corner,
+        # not leave a right-angle notch.
+        acc = np.zeros((96, 96), dtype=np.float32)
+        acc[16:80, 16:48] = 1.0
+        acc[48:80, 48:80] = 1.0  # 32-cell-wide stair
+        sharp = acc >= 0.4
+        rounded = SF.smooth_coverage_mask(
+            acc, threshold=0.4,
+            blur=SF.VIGNETTE_BLUR, open_r=SF.VIGNETTE_OPEN, close_r=SF.VIGNETTE_CLOSE,
+        )
+        # The inside corner (within 10 coarse cells of the concave
+        # vertex at (48, 48)) is empty on a sharp stair and filled after.
+        inner = rounded[38:48, 48:58]
+        self.assertGreater(float(inner.mean()), 0.8, "full-tile stair notch should fill near the corner")
+        # The 32×32 notch is not completely filled — it is a fillet,
+        # not a solid square — and we did not fill the whole field.
+        notch = rounded[16:48, 48:80]
+        self.assertLess(float(notch.mean()), 0.85)
+        self.assertGreater(float(notch.mean()), 0.1)
+        self.assertLess(float(rounded.mean()), 0.75)
+        self.assertGreater(float((rounded != sharp).mean()), 0.02)
+
+    def test_upsample_distance_is_smooth_not_nearest(self):
+        # A vertical step in the coarse field must become a ramp, not a
+        # one-pixel jump, when a z0 tile is upsampled (bicubic).
+        scale = 16
+        field = np.zeros((64, 64), dtype=np.float32)
+        field[:, 32:] = 100.0  # step at coarse x=32, which is tx=1 left edge
+        # Tile (1, 0) starts at coarse x=32 (512/16=32). Pad reaches into the step.
+        up = SF.upsample_distance(field, 1, 0, scale=scale)
+        self.assertEqual(up.shape, (512, 512))
+        row = up[256]
+        # Nearest-neighbour would jump by ~100 at one pixel. Bicubic/bilinear
+        # spreads the step over several pixels.
+        diffs = np.abs(np.diff(row))
+        self.assertLess(float(diffs.max()), 40.0, "upsample must not be nearest-neighbour")
+        # And the ramp actually spans more than two pixels.
+        wide = int((diffs > 2.0).sum())
+        self.assertGreater(wide, 4)
+
+    def test_fade_boundary_noise_is_continuous_lowfreq_and_deterministic(self):
+        a = SF.fade_boundary_noise(0, 0, amplitude=36, period=384, seed=17)
+        b = SF.fade_boundary_noise(1, 0, amplitude=36, period=384, seed=17)
+        a2 = SF.fade_boundary_noise(0, 0, amplitude=36, period=384, seed=17)
+        self.assertEqual(a.shape, (512, 512))
+        self.assertTrue(np.array_equal(a, a2), "noise must be deterministic")
+        # Shared vertical edge agrees (tx=0 right == tx=1 left).
+        # Adjacent world pixels (tx=0 at x=511, tx=1 at x=512), so they
+        # differ by one sample of a low-frequency field, not by a jump.
+        seam = np.abs(a[:, -1] - b[:, 0])
+        self.assertLess(float(seam.max()), 1.0, float(seam.max()))
+        # Low frequency: adjacent pixels change slowly vs the amplitude.
+        dx = np.abs(np.diff(a, axis=1)).max()
+        dy = np.abs(np.diff(a, axis=0)).max()
+        self.assertLess(float(dx), 4.0, dx)
+        self.assertLess(float(dy), 4.0, dy)
+        # It actually uses the range (not a flat field).
+        self.assertGreater(float(a.max() - a.min()), 20.0)
+        # Amplitude 0 is a zero field.
+        z = SF.fade_boundary_noise(0, 0, amplitude=0, period=384)
+        self.assertEqual(float(np.abs(z).max()), 0.0)
+
+    def test_noise_warps_a_straight_fade_isoline(self):
+        arr = np.full((512, 512, 3), self.GREEN, dtype=np.uint8)
+        yy, xx = np.mgrid[0:512, 0:512]
+        dist = (xx - 200).astype(np.float32)
+        straight, _ = SF.apply_coverage_fade(arr, dist, fade=128, inset=16, pad_rgb=self.PAD)
+        noise = SF.fade_boundary_noise(3, 5, amplitude=36, period=384, seed=17)
+        warped, _ = SF.apply_coverage_fade(arr, dist + noise, fade=128, inset=16, pad_rgb=self.PAD)
+        self.assertFalse(np.array_equal(straight, warped))
+        # Mid-blend column of the straight fade is a vertical isoline
+        # (every row nearly equal). After noise, the mid-blend x varies.
+        def mid_x(img):
+            green = img[:, :, 1].astype(np.float32)
+            # per row, first x where green has dropped halfway
+            # Green rises toward viewer beige (G=230), so the mid-blend
+            # is the first x where G has climbed past the halfway point.
+            mid = (float(self.GREEN[1]) + float(SF.VIEW_FOG[1])) / 2.0
+            xs = []
+            for y in range(0, 512, 8):
+                col = green[y]
+                crossed = np.where(col >= mid)[0]
+                xs.append(int(crossed[0]) if len(crossed) else 511)
+            return np.array(xs)
+        self.assertLess(int(np.ptp(mid_x(straight))), 3, "straight isoline should be vertical")
+        self.assertGreater(int(np.ptp(mid_x(warped))), 8, "noise should wobble the isoline")
+
+    def test_released_band_tiles_are_restored_from_clean(self):
+        # A dest tile that was in the previous edge band, but sits in
+        # the deep interior of the new field, must be copied from clean
+        # (unfaded), not left with the old fade.
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dest = root / "dest"
+            clean = root / "clean"
+            (dest / "0").mkdir(parents=True)
+            (clean / "0").mkdir(parents=True)
+            faded = np.full((512, 512, 3), SF.VIEW_FOG, dtype=np.uint8)
+            faded[:, :] = ((np.array(self.GREEN) + np.array(SF.VIEW_FOG)) // 2).astype(np.uint8)
+            Image.fromarray(faded, "RGB").save(dest / "0" / "0_0.webp", "WEBP")
+            Image.fromarray(np.full((512, 512, 3), self.GREEN, dtype=np.uint8), "RGB").save(
+                clean / "0" / "0_0.webp", "WEBP"
+            )
+            (dest / ".vignette-edge.jsonl").write_text("0,0\n")
+            # Field places this tile deep inside (dist << -inset).
+            field = np.full((64, 64), -400.0, dtype=np.float32)
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 2}
+            SF.apply_vignette_fade(
+                dest, grid, field, clean,
+                scale=16, fade=128, inset=16, noise_amp=0,
+            )
+            out = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB"))
+            self.assertTrue(np.allclose(out, self.GREEN, atol=2), "released tile must be unfaded clean")
 
 
 if __name__ == "__main__":
