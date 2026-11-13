@@ -310,5 +310,60 @@ class SliceFrontendTest(unittest.TestCase):
             self.assertTrue(any((dest / str(l["z"])).exists() for l in levels if l["z"] > 0))
 
 
+class RestyleMapShardTest(unittest.TestCase):
+    def test_parse_shard_is_zero_based_and_rejects_bad_specs(self):
+        self.assertEqual(restyle_map.parse_shard("0/8"), (0, 8))
+        self.assertEqual(restyle_map.parse_shard("7/8"), (7, 8))
+        with self.assertRaises(ValueError):
+            restyle_map.parse_shard("8/8")
+        with self.assertRaises(ValueError):
+            restyle_map.parse_shard("1/0")
+        with self.assertRaises(ValueError):
+            restyle_map.parse_shard("2")
+        with self.assertRaises(ValueError):
+            restyle_map.parse_shard("-1/4")
+
+    def test_shards_are_disjoint_and_cover_every_window(self):
+        ts = T.tiles_for(3000, 2000, 1024, 256)
+        n = 5
+        parts = [restyle_map.select_tiles(ts, shard=(i, n)) for i in range(n)]
+        ids = [[(t.x, t.y) for t in p] for p in parts]
+        flat = [xy for part in ids for xy in part]
+        self.assertEqual(len(flat), len(ts))
+        self.assertEqual(len(set(flat)), len(ts))
+        self.assertEqual(set(flat), {(t.x, t.y) for t in ts})
+        # no two shards share a window
+        for i in range(n):
+            for j in range(i + 1, n):
+                self.assertFalse(set(ids[i]) & set(ids[j]))
+
+    def test_explicit_windows_select_only_those_origins(self):
+        ts = T.tiles_for(3000, 2000, 1024, 256)
+        want = [(ts[0].x, ts[0].y), (ts[3].x, ts[3].y)]
+        got = restyle_map.select_tiles(ts, windows=want)
+        self.assertEqual([(t.x, t.y) for t in got], want)
+        with self.assertRaises(ValueError):
+            restyle_map.select_tiles(ts, windows=[(1, 2)])
+
+    def test_parse_windows_accepts_semicolons_and_spaces(self):
+        self.assertEqual(restyle_map.parse_windows("0,0;768,0"), [(0, 0), (768, 0)])
+        self.assertEqual(restyle_map.parse_windows("0,0 768,1024"), [(0, 0), (768, 1024)])
+
+    def test_resume_skips_an_existing_tile_without_calling_the_api(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "already.png"
+            Image.new("RGB", (64, 64), (10, 20, 30)).save(dest)
+            dest.write_bytes(dest.read_bytes() + b"\0" * 2000)
+            self.assertGreater(dest.stat().st_size, 1000)
+            src = Path(td) / "src.png"
+            Image.new("RGB", (64, 64), (1, 2, 3)).save(src)
+            result = restyle_map.restyle_one(src, dest, Path(td) / "x.log", "pixelsg", quality="medium")
+            self.assertTrue(result["skipped"])
+            self.assertEqual(result["calls"], 0)
+            self.assertEqual(result["usd"], 0.0)
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
