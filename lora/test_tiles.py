@@ -495,5 +495,238 @@ class BeigeCompositeTest(unittest.TestCase):
 
 
 
+class EdgeFogPolishTest(unittest.TestCase):
+    PAD = (0x1A, 0x1E, 0x1C)
+
+    def test_dark_fog_mask_keeps_water_and_city(self):
+        dark = np.full((16, 16, 3), (10, 12, 14), dtype=np.uint8)
+        self.assertTrue(SF.dark_fog_mask(dark, self.PAD).all())
+        pad = np.full((16, 16, 3), self.PAD, dtype=np.uint8)
+        self.assertTrue(SF.dark_fog_mask(pad, self.PAD).all())
+        black = np.zeros((16, 16, 3), dtype=np.uint8)
+        self.assertTrue(SF.dark_fog_mask(black, self.PAD).all())
+        water = np.full((16, 16, 3), SF.RESTYLE_WATER, dtype=np.uint8)
+        self.assertFalse(SF.dark_fog_mask(water, self.PAD).any())
+        city = np.full((16, 16, 3), (40, 120, 90), dtype=np.uint8)
+        self.assertFalse(SF.dark_fog_mask(city, self.PAD).any())
+        park = np.full((16, 16, 3), (30, 90, 40), dtype=np.uint8)
+        self.assertFalse(SF.dark_fog_mask(park, self.PAD).any())
+
+    def test_smooth_edge_fog_turns_a_dark_frame_beige_and_keeps_the_city(self):
+        arr = np.full((64, 64, 3), (8, 10, 9), dtype=np.uint8)
+        arr[16:48, 16:48] = (40, 120, 90)
+        out, status = SF.smooth_edge_fog(arr, self.PAD, feather=8)
+        self.assertEqual(status, "changed")
+        self.assertIsNotNone(out)
+        # city core stays green, not beige
+        core = out[28:36, 28:36]
+        self.assertGreater(int(core[:, :, 1].mean()), 80)
+        self.assertFalse(np.all(np.abs(core.astype(int) - SF.VIEW_FOG) <= 4))
+        # far into the original dark frame is viewer fog
+        corner = out[2:6, 2:6]
+        self.assertTrue(np.all(np.abs(corner.astype(int) - SF.VIEW_FOG) <= 6))
+
+    def test_smooth_edge_fog_drops_a_uniform_dark_tile(self):
+        arr = np.full((32, 32, 3), (6, 7, 6), dtype=np.uint8)
+        out, status = SF.smooth_edge_fog(arr, self.PAD, feather=4)
+        self.assertEqual(status, "empty")
+        self.assertIsNone(out)
+
+    def test_smooth_edge_fog_leaves_a_city_tile_alone(self):
+        arr = np.full((32, 32, 3), (50, 110, 80), dtype=np.uint8)
+        out, status = SF.smooth_edge_fog(arr, self.PAD, feather=4)
+        self.assertEqual(status, "unchanged")
+        self.assertTrue(np.array_equal(out, arr))
+
+    def test_pyramid_pad_is_viewer_fog_so_missing_children_are_not_dark(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "tiles"
+            (dest / "0").mkdir(parents=True)
+            city = Image.new("RGB", (512, 512), (40, 110, 90))
+            city.save(dest / "0" / "0_0.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 4}
+            present = {0: {(0, 0)}}
+            levels = SF._pyramid_from_z0(dest, grid, present, SF.VIEW_FOG)
+            self.assertTrue((dest / "1" / "0_0.webp").exists())
+            parent = np.asarray(Image.open(dest / "1" / "0_0.webp").convert("RGB"))
+            # right and bottom halves had no child: they must be beige, not dark pad
+            right = parent[:, 256:]
+            self.assertGreater(int(right.mean()), 180)
+            self.assertTrue(np.all(np.abs(right.astype(int) - SF.VIEW_FOG).mean(axis=2) < 25))
+            # leftover dark would have been a stair-step; leftover file is ignored
+            self.assertIn((0, 0), SF.unpack_bits(levels[0]["tiles"], 4, 4))
+
+    def test_pyramid_cleans_stale_parents_and_ignores_leftover_children(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "tiles"
+            (dest / "0").mkdir(parents=True)
+            (dest / "1").mkdir(parents=True)
+            Image.new("RGB", (512, 512), (40, 110, 90)).save(dest / "0" / "0_0.webp", "WEBP")
+            Image.new("RGB", (512, 512), (255, 0, 0)).save(dest / "0" / "1_0.webp", "WEBP")
+            Image.new("RGB", (512, 512), (0, 0, 255)).save(dest / "1" / "3_3.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 4, "rows": 4}
+            present = {0: {(0, 0)}}
+            levels = SF._pyramid_from_z0(dest, grid, present, SF.VIEW_FOG)
+            self.assertNotIn((1, 0), SF.unpack_bits(levels[0]["tiles"], 4, 4))
+            parent = np.asarray(Image.open(dest / "1" / "0_0.webp").convert("RGB"))
+            self.assertFalse((np.abs(parent[:, 256:].astype(int) - (255, 0, 0)) < 10).all())
+            # stale parent from a previous larger set is gone
+            self.assertFalse((dest / "1" / "3_3.webp").exists())
+
+
+class BayWaterFillTest(unittest.TestCase):
+    PAD = (0x1A, 0x1E, 0x1C)
+
+    def test_bad_water_catches_black_and_flat_blocks_and_keeps_textured_water(self):
+        rest = np.zeros((64, 64, 3), dtype=np.uint8)
+        rest[:32] = (0, 0, 0)  # black hole
+        rest[32:] = SF.RESTYLE_WATER  # flat teal
+        # procedural is textured teal throughout
+        rng = np.random.default_rng(0)
+        proc = np.clip(
+            np.array(SF.RESTYLE_WATER, dtype=np.int16)
+            + rng.integers(-18, 19, size=(64, 64, 3)),
+            0, 255,
+        ).astype(np.uint8)
+        # bump procedural std above the flat threshold
+        proc[::2, ::2] = (70, 140, 120)
+        water = np.ones((64, 64), dtype=bool)
+        bad = SF.bad_water_mask(rest, water, proc=proc, pad_rgb=self.PAD)
+        self.assertGreater(bad[:32].mean(), 0.9, "black hole should be bad")
+        self.assertGreater(bad[32:].mean(), 0.9, "flat sgWater against textured proc should be bad")
+        # a textured restyle of the same water is not bad
+        good_rest = proc.copy()
+        good_bad = SF.bad_water_mask(good_rest, water, proc=proc, pad_rgb=self.PAD)
+        self.assertLess(good_bad.mean(), 0.1)
+
+    def test_fill_bad_water_restores_black_bay_to_the_restyle_tone(self):
+        rest = np.zeros((64, 64, 3), dtype=np.uint8)
+        rest[0:8, 0:8] = (80, 90, 70)  # a little land, left alone
+        land = np.zeros((64, 64), dtype=bool)
+        land[0:8, 0:8] = True
+        water = ~land
+        rng = np.random.default_rng(1)
+        proc = np.clip(
+            np.array(SF.RESTYLE_WATER, dtype=np.int16)
+            + rng.integers(-12, 13, size=(64, 64, 3)),
+            0, 255,
+        ).astype(np.uint8)
+        proc[::3, ::3] = (60, 130, 110)
+        out, n = SF.fill_bad_water(rest, water, proc=proc, water_tone=SF.RESTYLE_WATER, origin=(100, 200), pad_rgb=self.PAD)
+        self.assertGreater(n, 64 * 64 * 0.7)
+        # land is untouched
+        self.assertTrue(np.array_equal(out[0:8, 0:8], rest[0:8, 0:8]))
+        # bay is no longer black and sits near sgWater
+        bay = out[16:, 16:]
+        self.assertGreater(int(bay[:, :, 1].mean()), 70)
+        self.assertGreater(int(bay[:, :, 1].mean() - bay[:, :, 0].mean()), 15)
+        self.assertGreater(int(bay.min()), 5)
+
+    def test_fill_without_procedural_uses_a_grained_tone(self):
+        rest = np.zeros((48, 48, 3), dtype=np.uint8)
+        water = np.ones((48, 48), dtype=bool)
+        out, n = SF.fill_bad_water(rest, water, proc=None, water_tone=SF.RESTYLE_WATER, origin=(0, 0), pad_rgb=self.PAD)
+        self.assertGreater(n, 40 * 40)
+        self.assertGreater(int(out[:, :, 1].mean()), 80)
+        # grain means it is not a single colour
+        self.assertGreater(len(np.unique(out.reshape(-1, 3), axis=0)), 8)
+
+    def test_water_mask_roi_translates_a_district_into_world_space(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # 32×16 mask, origin at local (-10, -4). Water is a 4×4 block at
+            # local mask pixel (8, 4) — i.e. local coord (-10+8, -4+4) = (-2, 0).
+            raw = root / "water_mask.raw"
+            width, height = 32, 16
+            mm = np.memmap(raw, dtype=np.uint8, mode="w+", shape=(height, width))
+            mm[:] = 0
+            mm[4:8, 8:12] = 255
+            mm.flush()
+            del mm
+            (root / "water_mask.json").write_text(
+                '{"width": 32, "height": 16, "origin": {"x": -10, "y": -4}, "encoding": "uint8"}\n'
+            )
+            # district local origin equals mask origin; world origin is (+100, +50)
+            # so world coord of the water block's top-left:
+            # local = (-2, 0), world = local - local_origin + world_origin
+            #        = (-2 - (-10) + 100, 0 - (-4) + 50) = (108, 54)
+            d = {
+                "chunks": root,
+                "origin": (100, 50),
+                "meta": {"origin": {"x": -10, "y": -4}},
+            }
+            SF.attach_water_masks([d])
+            self.assertIn("water_mask", d)
+            # crop a 8×8 window at the water block
+            roi = SF.water_mask_roi([d], 108, 54, 8, 8)
+            self.assertEqual(roi.shape, (8, 8))
+            self.assertTrue((roi[:4, :4] == 255).all(), roi[:4, :4])
+            self.assertTrue((roi[4:, :] == 0).all())
+            # a window far away is empty
+            empty = SF.water_mask_roi([d], 0, 0, 8, 8)
+            self.assertEqual(int(empty.max()), 0)
+
+    def test_polish_z0_deletes_dark_edge_tiles_and_fills_a_black_bay(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            restyle = root / "restyle"
+            proc = root / "proc"
+            (restyle / "0").mkdir(parents=True)
+            (proc / "0").mkdir(parents=True)
+            # (0,0) is a dark edge-fog tile — should be deleted
+            Image.new("RGB", (512, 512), (4, 5, 4)).save(restyle / "0" / "0_0.webp", "WEBP")
+            # (1,0) is a black bay; procedural has textured water
+            Image.new("RGB", (512, 512), (0, 0, 0)).save(restyle / "0" / "1_0.webp", "WEBP")
+            rng = np.random.default_rng(2)
+            proc_arr = np.clip(
+                np.array(SF.RESTYLE_WATER, dtype=np.int16)
+                + rng.integers(-14, 15, size=(512, 512, 3)),
+                0, 255,
+            ).astype(np.uint8)
+            proc_arr[::4, ::4] = (65, 135, 115)
+            Image.fromarray(proc_arr, "RGB").save(proc / "0" / "1_0.webp", "WEBP")
+            # also a procedural-only water cell at (2,0) with no restyle
+            Image.fromarray(proc_arr, "RGB").save(proc / "0" / "2_0.webp", "WEBP")
+            # a real city tile, left alone
+            Image.new("RGB", (512, 512), (80, 130, 100)).save(restyle / "0" / "0_1.webp", "WEBP")
+            grid = {"ox": 0, "oy": 0, "cols": 8, "rows": 8}
+            present = SF.polish_z0_tiles(
+                restyle, grid, districts=[], proc_dest=proc, pad_rgb=self.PAD, feather=8,
+                progress_path=root / "progress.jsonl",
+            )
+            self.assertNotIn((0, 0), present)
+            self.assertFalse((restyle / "0" / "0_0.webp").exists())
+            self.assertIn((0, 1), present)
+            city = np.asarray(Image.open(restyle / "0" / "0_1.webp").convert("RGB"))
+            self.assertGreater(int(city[10, 10, 1]), 100)
+            # bay tile is filled with teal, not black
+            self.assertIn((1, 0), present)
+            bay = np.asarray(Image.open(restyle / "0" / "1_0.webp").convert("RGB"))
+            self.assertGreater(int(bay[:, :, 1].mean()), 70)
+            self.assertGreater(int(bay[:, :, 1].mean() - bay[:, :, 0].mean()), 10)
+            # a missing restyle cell over procedural water is created
+            self.assertIn((2, 0), present)
+            self.assertTrue((restyle / "0" / "2_0.webp").exists())
+            created = np.asarray(Image.open(restyle / "0" / "2_0.webp").convert("RGB"))
+            self.assertGreater(int(created[:, :, 1].mean()), 70)
+
+    def test_real_water_needs_the_mask_and_procedural_agreement(self):
+        mask = np.zeros((16, 16), dtype=np.uint8)
+        mask[:, :8] = 255  # left half "kind = water", including unpainted default
+        proc = np.zeros((16, 16, 3), dtype=np.uint8)
+        proc[:, :8] = self.PAD  # left is dark fog, not real water
+        proc[:, 8:] = SF.RESTYLE_WATER  # right looks like water but mask says land
+        # no real water: mask-water is fog, mask-land is ignored
+        water = SF.real_water_mask(mask, proc)
+        self.assertFalse(water.any())
+        # when procedural left is actually teal, it is real water
+        proc[:, :8] = SF.RESTYLE_WATER
+        water = SF.real_water_mask(mask, proc)
+        self.assertTrue(water[:, :8].all())
+        self.assertFalse(water[:, 8:].any())
+
+
+
+
 if __name__ == "__main__":
     unittest.main()
