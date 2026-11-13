@@ -7,11 +7,48 @@ export const DEFAULT_WINDOW = 1024;
 export const DEFAULT_OVERLAP = 256;
 
 export const DEFAULT_PROMPT =
-  "Redraw this aerial isometric view as detailed isometric pixel art. " +
-  "Keep the exact building footprints, heights, streets, parks and camera. " +
-  "Richer materials, sharp pixel edges, tropical Shenzhen: glass curtain-wall towers, " +
-  "white and pastel mid-rises, dense urban villages, palms and greenery. " +
-  "Do not add, remove or move buildings. Do not change the perspective.";
+  "This is a style-only pass over an existing isometric pixel-art city map. " +
+  "Keep the exact camera, perspective, building footprints, heights, roof shapes, streets, parks, water and tree positions. " +
+  "Do not add, remove, merge, split or move any building, road or landmark. Do not invent text, signs or new structures. " +
+  "Enrich materials and lighting: sharp pixel edges, richer glass curtain-wall towers with sky reflections at the crown, " +
+  "white and pastel mid-rises, dense concrete and brick urban villages, tropical Shenzhen palms and greenery. " +
+  "Stay isometric pixel art — not photorealistic, not 3D CGI, not a painting. Consistent pixel scale across the frame.";
+
+/** Current best OpenAI image-edit model (gpt-image-1 was shut down 23 Oct 2026). Sunburst is the editing-precision line; 2.6 is the latest. */
+export const DEFAULT_OPENAI_MODEL = "gpt-image-2.6-sunburst";
+export const DEFAULT_OPENAI_QUALITY = "high";
+
+/** Official image-token rates, USD per million, as of late 2026. */
+const USD_PER_M = { textIn: 5, imageIn: 8, imageOut: 30 } as const;
+
+export interface TokenUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  input_tokens_details?: { text_tokens?: number; image_tokens?: number };
+  output_tokens_details?: { image_tokens?: number };
+}
+
+/** Approximate USD from an Images API `usage` object. */
+export function usdFromUsage(usage: TokenUsage | undefined): number {
+  if (!usage) return 0;
+  const textIn = usage.input_tokens_details?.text_tokens ?? 0;
+  const imageIn = usage.input_tokens_details?.image_tokens ?? Math.max(0, (usage.input_tokens ?? 0) - textIn);
+  const imageOut = usage.output_tokens_details?.image_tokens ?? usage.output_tokens ?? 0;
+  return (textIn * USD_PER_M.textIn + imageIn * USD_PER_M.imageIn + imageOut * USD_PER_M.imageOut) / 1e6;
+}
+
+/**
+ * A size the Images API will accept: multiples of 16, aspect between 1:3 and 3:1.
+ * Prefers the input's own dimensions so a 1536×1024 preview is not squashed into a square.
+ */
+export function openaiEditSize(width: number, height: number): string {
+  let w = Math.max(16, Math.round(width / 16) * 16);
+  let h = Math.max(16, Math.round(height / 16) * 16);
+  if (w / h > 3) h = Math.max(16, Math.round(w / 3 / 16) * 16);
+  if (h / w > 3) w = Math.max(16, Math.round(h / 3 / 16) * 16);
+  return `${w}x${h}`;
+}
 
 export interface Tile {
   x: number;
@@ -135,10 +172,10 @@ export function detectProvider(): { provider: Provider; key: string; model: stri
           "RESTYLE_PROVIDER=openai but no OPENAI_API_KEY is set. " +
           "Create one at https://platform.openai.com/api-keys and export OPENAI_API_KEY.",
       };
-    return { provider: "openai", key: openai, model: modelEnv || "gpt-image-1" };
+    return { provider: "openai", key: openai, model: modelEnv || DEFAULT_OPENAI_MODEL };
   }
   if (gemini) return { provider: "gemini", key: gemini, model: modelEnv || "gemini-2.5-flash-image" };
-  if (openai) return { provider: "openai", key: openai, model: modelEnv || "gpt-image-1" };
+  if (openai) return { provider: "openai", key: openai, model: modelEnv || DEFAULT_OPENAI_MODEL };
   return {
     error:
       "No image-model API key is set, so restyle cannot run. " +
@@ -196,26 +233,52 @@ async function paintGemini(png: Buffer, prompt: string, key: string, model: stri
   throw new Error(`Gemini ${model} returned no image`);
 }
 
-async function paintOpenAI(png: Buffer, prompt: string, key: string, model: string): Promise<Buffer> {
+async function paintOpenAI(
+  png: Buffer,
+  prompt: string,
+  key: string,
+  model: string,
+  log?: (msg: string) => void,
+): Promise<Buffer> {
+  const meta = await sharp(png).metadata();
+  const w = meta.width ?? 1024;
+  const h = meta.height ?? 1024;
+  const size = openaiEditSize(w, h);
+  const quality = (process.env.RESTYLE_QUALITY ?? DEFAULT_OPENAI_QUALITY).trim() || DEFAULT_OPENAI_QUALITY;
   const form = new FormData();
   form.set("model", model);
   form.set("prompt", prompt);
   const bytes = new Uint8Array(png.byteLength);
   bytes.set(png);
   form.set("image", new Blob([bytes], { type: "image/png" }), "tile.png");
-  form.set("size", "1024x1024");
+  form.set("size", size);
+  form.set("quality", quality);
+  form.set("output_format", "png");
   const res = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}` },
     body: form,
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`OpenAI ${model} HTTP ${res.status}: ${text.slice(0, 400)}`);
+    // never include request headers (they carry the key) and trim the body
+    const text = (await res.text()).replace(/sk-[a-zA-Z0-9_-]+/g, "[redacted]").slice(0, 400);
+    throw new Error(`OpenAI ${model} HTTP ${res.status}: ${text}`);
   }
-  const json = (await res.json()) as { data?: { b64_json?: string }[] };
+  const json = (await res.json()) as {
+    data?: { b64_json?: string }[];
+    usage?: TokenUsage;
+  };
   const data = json.data?.[0]?.b64_json;
   if (!data) throw new Error(`OpenAI ${model} returned no image`);
+  if (log && json.usage) {
+    const usd = usdFromUsage(json.usage);
+    const imgOut = json.usage.output_tokens_details?.image_tokens ?? json.usage.output_tokens ?? 0;
+    const imgIn = json.usage.input_tokens_details?.image_tokens ?? 0;
+    const textIn = json.usage.input_tokens_details?.text_tokens ?? 0;
+    log(
+      `restyle: usage ${size} quality=${quality} text_in=${textIn} image_in=${imgIn} image_out=${imgOut} ~$${usd.toFixed(4)}`,
+    );
+  }
   return Buffer.from(data, "base64");
 }
 
@@ -232,7 +295,7 @@ export async function restyleImage(opts: RestyleOpts): Promise<void> {
     paint =
       detected.provider === "gemini"
         ? (png) => paintGemini(png, prompt, detected.key, detected.model)
-        : (png) => paintOpenAI(png, prompt, detected.key, detected.model);
+        : (png) => paintOpenAI(png, prompt, detected.key, detected.model, log);
   }
 
   const src = sharp(opts.input).ensureAlpha();

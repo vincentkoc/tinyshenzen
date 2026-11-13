@@ -3,7 +3,17 @@ import os from "node:os";
 import path from "node:path";
 import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
-import { accumulate, detectProvider, edgeWeight, finalise, restyleImage, tilesFor } from "./restyle.js";
+import {
+  accumulate,
+  DEFAULT_OPENAI_MODEL,
+  detectProvider,
+  edgeWeight,
+  finalise,
+  openaiEditSize,
+  restyleImage,
+  tilesFor,
+  usdFromUsage,
+} from "./restyle.js";
 
 describe("tilesFor", () => {
   it("returns one tile when the picture fits in the window", () => {
@@ -92,6 +102,18 @@ describe("detectProvider", () => {
     const r = detectProvider();
     expect(r).toMatchObject({ provider: "gemini", model: "gemini-2.5-flash-image" });
   });
+
+  it("picks the current OpenAI image-edit model when OPENAI_API_KEY is set", () => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
+    delete process.env.RESTYLE_PROVIDER;
+    delete process.env.RESTYLE_MODEL;
+    process.env.OPENAI_API_KEY = "test-not-a-real-key";
+    const r = detectProvider();
+    expect(r).toMatchObject({ provider: "openai", model: DEFAULT_OPENAI_MODEL });
+    expect(DEFAULT_OPENAI_MODEL).toMatch(/^gpt-image-/);
+    expect(DEFAULT_OPENAI_MODEL).not.toBe("gpt-image-1");
+  });
 });
 
 describe("restyleImage", () => {
@@ -138,5 +160,29 @@ describe("restyleImage", () => {
     expect(data[last]).toBe(255);
     expect(data[last + 2]).toBe(0);
     fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe("openaiEditSize", () => {
+  it("keeps official 1536×1024 and 1024×1024 sizes exact, so previews are not squashed", () => {
+    expect(openaiEditSize(1536, 1024)).toBe("1536x1024");
+    expect(openaiEditSize(1024, 1024)).toBe("1024x1024");
+    expect(openaiEditSize(1024, 1536)).toBe("1024x1536");
+  });
+
+  it("rounds odd tile sizes to multiples of 16", () => {
+    expect(openaiEditSize(800, 600)).toBe("800x608");
+  });
+});
+
+describe("usdFromUsage", () => {
+  it("prices text input, image input and image output at the official per-million rates", () => {
+    const usd = usdFromUsage({
+      input_tokens_details: { text_tokens: 200, image_tokens: 1250 },
+      output_tokens_details: { image_tokens: 1372 },
+      output_tokens: 1372,
+    });
+    // 200*5 + 1250*8 + 1372*30 = 1000 + 10000 + 41160 = 52160 / 1e6
+    expect(usd).toBeCloseTo(0.05216, 5);
   });
 });
