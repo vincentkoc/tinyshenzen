@@ -165,12 +165,16 @@ python3 lora/water_constrain.py \
 # with a tone-matched sample. --polish-vignette is the preferred free
 # edge pass: it reslices the edge from the source restyle windows (not
 # from already-faded tiles), keeps the bay-water fill and south-shore
-# land restore, builds one coarse coverage mask with morphological
-# cleanup, and applies a single noise-free vignette (~1–2 tiles) to
-# viewer beige. It is resume-safe and idempotent from source. Do not
-# run --polish immediately before it: the per-tile feather is what
-# made the quilted fade. --polish-edge is the earlier global-fade
-# attempt and is kept for the existing tests.
+# land restore, builds one coarse coverage mask with a wide blur and
+# morphological close/open so the boundary does not follow source-tile
+# edges, bicubically upsamples the distance field, and applies a single
+# vignette (~1–2 tiles) to viewer beige whose falloff is displaced by
+# low-frequency noise so the edge looks organic rather than stepped.
+# Changing fade or smoothing parameters reuses the clean staging and
+# only rebuilds the field and fade. It is resume-safe and idempotent
+# from source. Do not run --polish immediately before it: the per-tile
+# feather is what made the quilted fade. --polish-edge is the earlier
+# global-fade attempt and is kept for the existing tests.
 # python3 lora/slice_frontend.py \
 #   --chunks /tmp/tinysz-core \
 #   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
