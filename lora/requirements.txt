@@ -1,0 +1,7 @@
+# CPU path: dataset prep, contact sheet, MultiDiffusion stitch. No torch.
+Pillow>=10.0
+numpy>=1.26
+
+# GPU path (install on the 24 GB box, not here):
+#   git clone https://github.com/kohya-ss/musubi-tuner
+#   follow musubi-tuner's own requirements (torch CUDA, accelerate, etc.)
