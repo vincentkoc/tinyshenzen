@@ -73,6 +73,13 @@ npm run cli -- --city tinysz card       # share card into ../tinyworlds-frontend
 npm run cli -- restyle --in preview.png # optional image-model restyle (needs a key)
 ```
 
+A Pixel-Singapore-inspired **image-edit LoRA**, trained on our own teacher
+tiles (procedural windows paired with `--look pixelsg` restyles — never on a
+third-party map), lives in [`lora/`](lora/README.md): dataset prep, a 24 GB
+Qwen-Image-Edit-2511 training script, and MultiDiffusion inference with the
+same overlapping hem as `restyle`. Teacher images and LoRA weights are not
+committed.
+
 Generated tiles and raw extracts are not committed (`tinyworlds-pipeline/data/` and
 `tinyworlds-frontend/public/data/`). They are reproducible with the commands above.
 

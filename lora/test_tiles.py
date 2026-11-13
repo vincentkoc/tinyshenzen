@@ -11,8 +11,10 @@ from pathlib import Path
 
 from PIL import Image
 
+import blend
 import prepare_dataset
 import tiles as T
+from tiles import Tile
 
 
 class TilesForTest(unittest.TestCase):
@@ -65,6 +67,31 @@ class PrepareDatasetTest(unittest.TestCase):
             self.assertIn("control_resolution = [1024, 1024]", toml)
             self.assertIn(str((dest / "images").resolve()), toml)
             self.assertIn(str((dest / "controls").resolve()), toml)
+
+class StitchTest(unittest.TestCase):
+    def test_overlapping_solids_blend_in_the_hem(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            # two 64x64 tiles overlapping by 16 on a 112x64 canvas (step 48)
+            a = Image.new("RGB", (64, 64), (255, 0, 0))
+            b = Image.new("RGB", (64, 64), (0, 0, 255))
+            pa, pb = root / "a.png", root / "b.png"
+            a.save(pa); b.save(pb)
+            tiles = [Tile(0, 0, 64, 64), Tile(48, 0, 64, 64)]
+            paths = {(0, 0): pa, (48, 0): pb}
+            im = blend.stitch_bands(tiles, paths, 112, 64, overlap=16, out_path=None)
+            self.assertEqual(im.size, (112, 64))
+            pix = im.load()
+            # far left is red, far right is blue
+            self.assertEqual(pix[8, 32], (255, 0, 0))
+            self.assertEqual(pix[104, 32], (0, 0, 255))
+            # in the hem, a mix — not a hard seam
+            mid = pix[56, 32]
+            self.assertTrue(mid[0] > 20 and mid[2] > 20, mid)
+            self.assertFalse(mid in ((255, 0, 0), (0, 0, 255), (0, 0, 0)), mid)
+
+
+
 
 if __name__ == "__main__":
     unittest.main()
