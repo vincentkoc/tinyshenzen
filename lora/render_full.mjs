@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Render the Futian test box (tinysz) as 2048×2048 chunks, plus a downscaled
- * preview. A single 23500×11175 PNG would exceed comfortable sharp/RAM limits
- * on a 16 GB box; MultiDiffusion and the OpenAI restyle read the chunks.
+ * Render a Shenzhen city box as 2048×2048 chunks, plus a downscaled preview.
+ * A single full-size PNG would exceed comfortable sharp/RAM limits on a 16 GB
+ * box; MultiDiffusion and the OpenAI restyle read the chunks.
  *
- * Usage (from the repo root, pipeline already built):
+ * Usage (from the repo root, pipeline already built, scene already written):
  *
  *   node --max-old-space-size=4096 lora/render_full.mjs \
- *     --out /workspace/tinysz-futian
+ *     --city tinysz-nanshan --out /workspace/tinysz-nanshan
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -18,8 +18,22 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "..");
 const pipeline = path.join(repo, "tinyworlds-pipeline");
 
-process.argv.splice(2, 0, "--city", "tinysz");
-process.env.TINY_CITY = "tinysz";
+const { values } = parseArgs({
+  options: {
+    out: { type: "string" },
+    chunk: { type: "string", default: "2048" },
+    preview: { type: "string", default: "4096" },
+    city: { type: "string", default: "tinysz" },
+  },
+  strict: false,
+});
+
+const city = values.city || "tinysz";
+// config.ts reads --city / TINY_CITY at import time — set them first.
+if (!process.argv.includes("--city") && !process.argv.some((a) => a.startsWith("--city="))) {
+  process.argv.splice(2, 0, "--city", city);
+}
+process.env.TINY_CITY = city;
 
 const { DIRS } = await import(path.join(pipeline, "dist/config.js"));
 const { makeProjection } = await import(path.join(pipeline, "dist/projection.js"));
@@ -28,17 +42,13 @@ const { ChunkRenderer } = await import(path.join(pipeline, "dist/render/chunk.js
 const { toRgba, writePng } = await import(path.join(pipeline, "dist/render/encode.js"));
 const { loadScene } = await import(path.join(pipeline, "dist/render/scene.js"));
 
-const { values } = parseArgs({
-  options: {
-    out: { type: "string", default: "/workspace/tinysz-futian" },
-    chunk: { type: "string", default: "2048" },
-    preview: { type: "string", default: "4096" },
-    city: { type: "string" }, // swallowed if passed; already forced tinysz
-  },
-  strict: false,
-});
-
-const out = path.resolve(values.out);
+const defaultOut = {
+  tinysz: "/workspace/tinysz-futian",
+  "tinysz-nanshan": "/workspace/tinysz-nanshan",
+  "tinysz-luohu": "/workspace/tinysz-luohu",
+  "tinysz-core": "/workspace/tinysz-core",
+};
+const out = path.resolve(values.out || defaultOut[city] || `/workspace/${city}`);
 const chunk = Math.max(256, Number(values.chunk));
 const previewW = Math.max(256, Number(values.preview));
 const chunksDir = path.join(out, "chunks");
@@ -53,7 +63,7 @@ const renderer = new ChunkRenderer(scene);
 const cols = Math.ceil(width / chunk);
 const rows = Math.ceil(height / chunk);
 const meta = {
-  city: "tinysz",
+  city,
   look: scene.look ?? null,
   origin: { x: minX, y: minY },
   width,

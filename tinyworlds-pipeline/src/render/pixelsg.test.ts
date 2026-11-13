@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { CITIES } from "../cities/index.js";
-import { tinysz, tinyszFull } from "../cities/tinysz.js";
+import { tinysz, tinyszCore, tinyszFull, tinyszLuohu, tinyszNanshan } from "../cities/tinysz.js";
 import { SHENZHEN, SHENZHEN_HABBO } from "../scene/styles.js";
 import { G } from "../scene/kinds.js";
 import { idx, R, S_LIT } from "./palette.js";
@@ -11,12 +11,15 @@ describe("pixelsg look", () => {
   it("is the default Shenzhen look, and is off for every other city", () => {
     expect(tinysz.look?.pixelsg).toBe(true);
     expect(tinyszFull.look?.pixelsg).toBe(true);
+    expect(tinyszNanshan.look?.pixelsg).toBe(true);
+    expect(tinyszLuohu.look?.pixelsg).toBe(true);
+    expect(tinyszCore.look?.pixelsg).toBe(true);
     expect(tinysz.look?.habbo).toBeFalsy();
     expect(tinysz.style).toBe(SHENZHEN);
     expect(tinysz.style).not.toBe(SHENZHEN_HABBO);
     for (const [id, city] of Object.entries(CITIES)) {
-      if (id === "tinysz" || id === "tinysz-full") continue;
-      expect(city.look?.pixelsg).toBeFalsy();
+      if (id.startsWith("tinysz")) continue;
+      expect(city.look?.pixelsg, id).toBeFalsy();
     }
   });
 

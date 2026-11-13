@@ -21,6 +21,27 @@ export const TEST_BBOX: City["bbox"] = { west: 114.048, south: 22.527, east: 114
 /** Urban core: Futian, Nanshan, Luohu and the neighbouring districts. */
 export const FULL_BBOX: City["bbox"] = { west: 113.8, south: 22.45, east: 114.3, north: 22.75 };
 
+/**
+ * Nanshan core: Shekou, Houhai, the Science Park and OCT. The east edge abuts
+ * the Futian test box at 114.048° E, so the two renders sit side by side.
+ */
+export const NANSHAN_BBOX: City["bbox"] = { west: 113.9, south: 22.47, east: 114.048, north: 22.564 };
+
+/**
+ * Luohu core: Caiwuwei (KK100), Dongmen and Luohu Port. The west edge abuts
+ * the Futian test box at 114.088° E.
+ */
+export const LUOHU_BBOX: City["bbox"] = { west: 114.088, south: 22.522, east: 114.14, north: 22.564 };
+
+/** Contiguous strip covering the Nanshan core, Futian, and the Luohu core. */
+export const CORE_BBOX: City["bbox"] = { west: 113.9, south: 22.47, east: 114.14, north: 22.564 };
+
+/** Houhai / China Resources Headquarters, a natural start for the Nanshan box. */
+export const HOUHAI = { lon: 113.94167, lat: 22.51694 };
+
+/** KK100 in Caiwuwei, a natural start for the Luohu box. */
+export const CAIWUWEI = { lon: 114.10194, lat: 22.54667 };
+
 /** English names for districts the data often has only in Chinese. */
 const DISTRICT_NAMES: Record<string, string> = {
   福田区: "Futian",
@@ -61,16 +82,24 @@ function areas(rawDir: string): Areas {
   };
 }
 
-function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: City["fog"] }): City {
+function shenzhen(spec: {
+  id: string;
+  title: string;
+  bbox: City["bbox"];
+  fog: City["fog"];
+  origin?: City["origin"];
+  start?: City["start"];
+  card?: City["card"];
+}): City {
   return {
     id: spec.id,
     title: spec.title,
-    origin: CENTER,
+    origin: spec.origin ?? CENTER,
     // Futian's grid follows the compass: Shennan Road runs east–west, the Civic Center axis north–south
     betaDeg: 0,
     k: 2,
     bbox: spec.bbox,
-    start: { ...CENTER, scale: 0.85 },
+    start: spec.start ?? { ...CENTER, scale: 0.85 },
     maxScale: 3,
     attribution: [
       "© OpenStreetMap contributors",
@@ -90,8 +119,8 @@ function shenzhen(spec: { id: string; title: string; bbox: City["bbox"]; fog: Ci
       }),
     ],
     accent: "#1aa6c1",
-    // Ping An Finance Centre and the Civic Center together
-    card: { lon: 114.059, lat: 22.542, shrink: 4 },
+    // Ping An Finance Centre and the Civic Center together, unless a district box overrides
+    card: spec.card ?? { lon: 114.059, lat: 22.542, shrink: 4 },
 
     limits: {
       kind: "built-up",
@@ -173,4 +202,34 @@ export const tinyszFull: City = shenzhen({
   title: "Shenzhen (urban core)",
   bbox: FULL_BBOX,
   fog: { start: 1400, end: 2800 },
+});
+
+/** Nanshan core, west of and contiguous with the Futian test box. */
+export const tinyszNanshan: City = shenzhen({
+  id: "tinysz-nanshan",
+  title: "Shenzhen (Nanshan)",
+  bbox: NANSHAN_BBOX,
+  fog: { start: 800, end: 1700 },
+  origin: HOUHAI,
+  start: { ...HOUHAI, scale: 0.85 },
+  card: { lon: HOUHAI.lon, lat: HOUHAI.lat, shrink: 4 },
+});
+
+/** Luohu core, east of and contiguous with the Futian test box. */
+export const tinyszLuohu: City = shenzhen({
+  id: "tinysz-luohu",
+  title: "Shenzhen (Luohu)",
+  bbox: LUOHU_BBOX,
+  fog: { start: 600, end: 1300 },
+  origin: CAIWUWEI,
+  start: { ...CAIWUWEI, scale: 0.85 },
+  card: { lon: CAIWUWEI.lon, lat: CAIWUWEI.lat, shrink: 4 },
+});
+
+/** Nanshan core, Futian and Luohu core as one contiguous strip. */
+export const tinyszCore: City = shenzhen({
+  id: "tinysz-core",
+  title: "Shenzhen (Nanshan–Futian–Luohu)",
+  bbox: CORE_BBOX,
+  fog: { start: 1200, end: 2400 },
 });

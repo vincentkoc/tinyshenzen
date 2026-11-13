@@ -13,7 +13,7 @@ import { tinyrao } from "./tinyrao.js";
 import { tinytkf } from "./tinytkf.js";
 import { tinyvlc } from "./tinyvlc.js";
 import { tinywesteros } from "./tinywesteros.js";
-import { tinysz, tinyszFull } from "./tinysz.js";
+import { tinysz, tinyszCore, tinyszFull, tinyszLuohu, tinyszNanshan } from "./tinysz.js";
 import { tinywinterfell } from "./tinywinterfell.js";
 import type { City } from "./types.js";
 
@@ -22,6 +22,9 @@ export type { City } from "./types.js";
 export const CITIES: Record<string, City> = {
   tinysz,
   "tinysz-full": tinyszFull,
+  "tinysz-nanshan": tinyszNanshan,
+  "tinysz-luohu": tinyszLuohu,
+  "tinysz-core": tinyszCore,
   tinynyc,
   tinyrao,
   tinyorl,
