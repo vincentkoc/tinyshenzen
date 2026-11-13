@@ -10,6 +10,8 @@ export const DEFAULT_PROMPT =
   "This is a style-only pass over an existing isometric pixel-art city map. " +
   "Keep the exact camera, perspective, building footprints, heights, roof shapes, streets, parks, water and tree positions. " +
   "Do not add, remove, merge, split or move any building, road or landmark. Do not invent text, signs or new structures. " +
+  "Do not invent water, harbours or rivers on dry land; empty land stays empty land. " +
+  "Do not add rooftop gardens, extra trees or vehicles that are not already in the input. " +
   "Enrich materials and lighting: sharp pixel edges, richer glass curtain-wall towers with sky reflections at the crown, " +
   "white and pastel mid-rises, dense concrete and brick urban villages, tropical Shenzhen palms and greenery. " +
   "Stay isometric pixel art — not photorealistic, not 3D CGI, not a painting. Consistent pixel scale across the frame.";
@@ -36,14 +38,16 @@ export const PIXELSG_PROMPT =
   "Redraw this isometric city view as detailed isometric pixel art in a fine naturalistic miniature style. " +
   "Keep the exact camera, 2:1 dimetric projection, building footprints, heights, roof shapes, street layout, parks, water and skyline. " +
   "Do not add, remove, merge, split or move any building, road or landmark. Do not invent text, signs or new structures. " +
+  "Do not invent water, harbours or rivers on dry land; empty land stays empty land. " +
+  "Do not add rooftop gardens, extra trees or vehicles that are not already in the input. " +
   "No cartoon black outlines and no Habbo-style chunky cel-shading: edges come from value contrast only. " +
   "Natural daylight from the upper left, soft cool shadows, verticals stay vertical, no vanishing point. " +
   "Muted warm-grey and beige concrete towers; teal-green and sky-blue glass curtain walls with sky reflections and very fine window grids. " +
-  "Pastel mid-rises in cream, pale pink and pale blue, with regular punched windows and rooftop plant. " +
-  "Low buildings with terracotta tiled pitched roofs. Occasional green roofs, pools and pale helipads. " +
+  "Pastel mid-rises in cream, pale pink and pale blue, with regular punched windows. " +
+  "Low buildings with terracotta tiled pitched roofs. Keep any green roofs, pools and pale helipads already in the input. " +
   "Lush tropical parks: dense rounded individual tree crowns in many greens, some palms, slightly varied lawn. " +
   "Teal-green water, slightly textured, even in colour, with a clean shoreline. " +
-  "Grey asphalt roads with yellow and white lane markings and a few small cars and buses. " +
+  "Grey asphalt roads with yellow and white lane markings, and only the cars and buses already visible in the input. " +
   "Stay fine-scale isometric pixel art — a tilt-shift miniature, not chunky toy pixels, not photorealistic 3D, not a painterly canvas. " +
   "Preserve landmark identities and relative heights. Consistent pixel scale across the frame.";
 

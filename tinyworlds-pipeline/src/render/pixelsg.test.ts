@@ -39,5 +39,7 @@ describe("pixelsg look", () => {
     expect(PIXELSG_PROMPT).toMatch(/teal/i);
     expect(PIXELSG_PROMPT).toMatch(/terracotta/i);
     expect(PIXELSG_PROMPT.toLowerCase()).not.toMatch(/yadong|upload this image|style reference image/);
+    expect(PIXELSG_PROMPT.toLowerCase()).toMatch(/do not invent water/);
+    expect(PIXELSG_PROMPT.toLowerCase()).toMatch(/do not add rooftop gardens/);
   });
 });
