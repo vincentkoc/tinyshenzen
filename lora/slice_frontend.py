@@ -32,8 +32,12 @@ from source. `--polish-water` then puts bay water on one teal (fine
 wave texture kept, no tone step on tile seams), fills the restyle's fog
 holes over open water and fades water along its own smoothed body
 field; `--polish-forest` cross-fades the gray-washed land just inside
-the edge band to the vignette's clean staging. Both are free and
-idempotent, and run after `--polish-vignette`, passed together.
+the edge band to the vignette's clean staging and evens restyle-window
+greens near the edge and on forest-dominant ground inland;
+`--polish-flats` fades featureless ground near the edge (flat fill,
+gray puddles, dithered blotches) and the water beside it into the fog
+with a soft cross-tile mask. All are free and idempotent, and run
+after `--polish-vignette`, passed together.
 Higher zoom levels are rebuilt with viewer-fog padding so missing
 children do not become dark squares. Generated images are not
 committed.
@@ -2456,7 +2460,12 @@ def polish_vignette(
 # hold an older gray wash (squares along the eastern hills). There the
 # land cross-fades to the vignette's clean staging, fully clean near the
 # band and back to dest at FOREST_DEPTH, along the same global distance
-# field, so no step lands on a tile seam. Nothing is drawn new.
+# field, so no step lands on a tile seam. Restyle-window greens are
+# also evened (texture kept) near the edge and on forest-dominant ground.
+#
+# --polish-flats: featureless ground near the edge (flat fill, gray
+# puddles, dithered blotches) and the water beside it fade into the fog
+# through a soft cross-tile mask. Nothing is drawn new.
 #
 # Sources are immutable (clean staging for the edge band, a one-time
 # snapshot of dest elsewhere), so both passes are idempotent. Run them
@@ -2478,7 +2487,7 @@ WATER_FIELD_THRESHOLD = 0.3
 WATER_FIELD_BLUR = 24
 WATER_FIELD_OPEN = 6
 WATER_FIELD_CLOSE = 24
-WATER_VERSION = "water-6"
+WATER_VERSION = "water-10"
 # Clean-staging weight: 1 at FOREST_FULL px inside the edge, 0 at FOREST_DEPTH
 # (just above the field's cap, so deep interior tiles are never touched).
 FOREST_DEPTH = 850
@@ -2496,6 +2505,26 @@ FOREST_LOCAL_RADIUS = 48.0
 # it is at least FOREST_PROX_LEVEL. Deep interior keeps its own greens.
 FOREST_PROX_SIGMA = 24.0
 FOREST_PROX_LEVEL = 0.15
+# Inland, the match also covers forest-dominant ground: the blurred
+# vegetation fraction ramps the strength from FOREST_DOM_LO to FOREST_DOM_HI,
+# so streets and parks in the city keep their own greens.
+FOREST_DOM_SIGMA = 8.0
+FOREST_DOM_LO = 0.4
+FOREST_DOM_HI = 0.7
+# --polish-flats: featureless ground near the edge (flat restyle fill, gray
+# puddles, white lots, renderer wash) fades into the viewer fog through a
+# soft cross-tile mask instead of ending in hard-edged blotches.
+FLATS_SIGMA = 1.5
+FLATS_LO = 0.25
+FLATS_HI = 0.75
+FLATS_MAX_STD = 4.0
+# Water beside fogged flats fades over a wider reach so the shore is not
+# a hard teal edge against the fog; thin lines inside flats are absorbed.
+FLATS_WATER_SIGMA = 3.0
+FLATS_WATER_LO = 0.05
+FLATS_WATER_HI = 0.45
+FLATS_GATE_BLUR = 10.0
+FLATS_MAX_CHROMA = 28
 
 
 WATER_MAX_LUM = 115
@@ -2666,6 +2695,26 @@ def is_vegetation(arr: np.ndarray) -> np.ndarray:
     return (g - r >= 15) & (g - b >= 25) & (b - r < 10) & (rgb.mean(axis=2) < 170)
 
 
+def is_featureless(arr: np.ndarray) -> np.ndarray:
+    """Flat, near-neutral ground with no drawn detail (not water, not sand).
+
+    Measured on a 4x box-averaged copy so the procedural ground's
+    checker dither counts as flat; buildings, roads and trees do not.
+    """
+    rgb = arr[:, :, :3].astype(np.float32)
+    h, w = rgb.shape[:2]
+    k = 4
+    small = rgb[: h - h % k, : w - w % k].reshape(h // k, k, w // k, k, 3).mean(axis=(1, 3))
+    chroma = small.max(axis=2) - small.min(axis=2)
+    lum = small.mean(axis=2)
+    flat = _block_std(small, 4) < FLATS_MAX_STD
+    teal = is_teal_water(np.clip(small, 0, 255).astype(np.uint8), max_lum=255.0)
+    m = flat & (chroma < FLATS_MAX_CHROMA) & (lum > 85) & (lum < 240) & ~teal
+    out = np.zeros((h, w), dtype=bool)
+    out[: h - h % k, : w - w % k] = np.repeat(np.repeat(m, k, axis=0), k, axis=1)
+    return out
+
+
 def normalized_blur(values: np.ndarray, weights: np.ndarray, radius: float) -> tuple[np.ndarray, np.ndarray]:
     """Weighted Gaussian mean of `values` (H, W, C) and the blurred weight."""
     w = gaussian_blur_float(weights.astype(np.float32), radius)
@@ -2772,6 +2821,8 @@ def polish_water(
     lossless_z0: bool = True,
     water: bool = True,
     forest: bool = False,
+    flats: bool = False,
+    tile_filter=None,
     depth: int = FOREST_DEPTH,
     full: int = FOREST_FULL,
 ) -> set[tuple[int, int]]:
@@ -2795,21 +2846,13 @@ def polish_water(
     present = present_from_disk(dest, cols, rows)
     vig_band, exterior = edge_band_from_field(field, grid, fade=fade, inset=inset, scale=scale)
     fzone = forest_zone(field, grid, vig_band, exterior, depth=depth, scale=scale) if forest else set()
-    # Tiles whose vegetation tone is matched: within reach of the edge band.
-    prox = None
+    # Vegetation tone (near the edge and on forest-dominant ground) and flats
+    # fog (near the edge) are decided after the stats pass.
+    prox = edge_proximity(grid, vig_band | exterior) if (forest or flats) else None
     ftiles: set[tuple[int, int]] = set()
-    if forest:
-        prox = edge_proximity(grid, vig_band | exterior)
-        f8 = TILE // FOREST_TONE_SCALE
-        for ty in range(rows):
-            for tx in range(cols):
-                if (tx, ty) in exterior:
-                    continue
-                if float(prox[ty * f8 : (ty + 1) * f8, tx * f8 : (tx + 1) * f8].max()) > 0.01:
-                    ftiles.add((tx, ty))
 
     stamp = water_stamp(fade, inset, water_inset, radius, ref, noise_amp, noise_period,
-                        water=water, forest=forest, depth=depth, full=full)
+                        water=water, forest=forest, depth=depth, full=full) + f"flats={int(flats)}\n"
     stamp_path = dest / ".water-stamp"
     progress_path = dest / ".water-progress.jsonl"
     if stamp_path.exists() and stamp_path.read_text() != stamp:
@@ -2907,37 +2950,69 @@ def polish_water(
     print("  building the water-body field", flush=True)
     water_field = build_water_field(counts, fade=fade, water_inset=water_inset)
     del counts
-    todo = sorted(set(todo) | ftiles, key=lambda t: (t[1], t[0]))
 
-    # 1b. vegetation tone field over the forest tiles (cross-tile mean green)
-    veg_field = veg_weight = None
-    if forest:
-        f8 = TILE // FOREST_TONE_SCALE
+    # 1b. vegetation tone field (cross-tile mean green) and flats fraction,
+    # over every non-exterior tile
+    veg_field = veg_weight = veg_strength = flats_field = flats_wfield = None
+    f8 = TILE // FOREST_TONE_SCALE
+    sc = FOREST_TONE_SCALE
+    if forest or flats:
         vsums = np.zeros((rows * f8, cols * f8, 3), dtype=np.float32)
         vcounts = np.zeros((rows * f8, cols * f8), dtype=np.float32)
+        fcounts = np.zeros((rows * f8, cols * f8), dtype=np.float32)
         t0 = time.time()
-        for k, (tx, ty) in enumerate(sorted(ftiles, key=lambda t: (t[1], t[0])), 1):
-            arr = composed(tx, ty, np.zeros((TILE, TILE), dtype=bool))
-            if arr is None:
-                continue
-            veg = is_vegetation(arr)
-            if not veg.any():
-                continue
-            sc = FOREST_TONE_SCALE
-            vf = veg.astype(np.float32)
-            vcounts[ty * f8 : (ty + 1) * f8, tx * f8 : (tx + 1) * f8] = vf.reshape(f8, sc, f8, sc).sum(axis=(1, 3))
-            for ch in range(3):
-                vsums[ty * f8 : (ty + 1) * f8, tx * f8 : (tx + 1) * f8, ch] = (
-                    (arr[:, :, ch].astype(np.float32) * vf).reshape(f8, sc, f8, sc).sum(axis=(1, 3))
-                )
-            if k % 500 == 0:
-                print(f"  forest stats {k}/{len(ftiles)}, {time.time() - t0:.1f}s", flush=True)
-        vmean = vsums / np.maximum(vcounts, 1.0)[:, :, None]
-        veg_field, veg_weight = normalized_blur(vmean, (vcounts > 0).astype(np.float32) * vcounts, FOREST_TONE_SIGMA)
-        # cells far from any vegetation keep their own tone (no shift)
-        veg_weight = veg_weight / float(FOREST_TONE_SCALE * FOREST_TONE_SCALE)
-        del vsums, vcounts, vmean
-        print(f"  forest tone field over {len(ftiles)} tiles, {time.time() - t0:.1f}s", flush=True)
+        k = 0
+        for ty in range(rows):
+            for tx in range(cols):
+                if (tx, ty) in exterior:
+                    continue
+                arr = composed(tx, ty, np.zeros((TILE, TILE), dtype=bool))
+                if arr is None:
+                    continue
+                k += 1
+                blk = (slice(ty * f8, (ty + 1) * f8), slice(tx * f8, (tx + 1) * f8))
+                if forest:
+                    veg = is_vegetation(arr)
+                    if veg.any():
+                        vf = veg.astype(np.float32)
+                        vcounts[blk] = vf.reshape(f8, sc, f8, sc).sum(axis=(1, 3))
+                        for ch in range(3):
+                            vsums[blk + (ch,)] = (arr[:, :, ch].astype(np.float32) * vf).reshape(f8, sc, f8, sc).sum(axis=(1, 3))
+                if flats and float(prox[blk].max()) > 0.01:
+                    feat = is_featureless(arr)
+                    if (tx, ty) in wtodo:
+                        feat &= ~mask_at(tx, ty)  # restyle fog over the bay is filled, not fogged
+                    fcounts[blk] = feat.astype(np.float32).reshape(f8, sc, f8, sc).sum(axis=(1, 3))
+                if k % 1000 == 0:
+                    print(f"  forest/flats stats {k} tiles, {time.time() - t0:.1f}s", flush=True)
+        area = float(sc * sc)
+        if forest:
+            vmean = vsums / np.maximum(vcounts, 1.0)[:, :, None]
+            veg_field, veg_weight = normalized_blur(vmean, vcounts, FOREST_TONE_SIGMA)
+            # cells far from any vegetation keep their own tone (no shift)
+            veg_weight = veg_weight / area
+            dom = smoothstep(gaussian_blur_float(vcounts / area, FOREST_DOM_SIGMA), FOREST_DOM_LO, FOREST_DOM_HI)
+            veg_strength = np.maximum(prox, dom).astype(np.float32)
+            del vmean
+        if flats:
+            ff = smoothstep(gaussian_blur_float(fcounts / area, FLATS_SIGMA), FLATS_LO, FLATS_HI)
+            flats_field = (ff * prox).astype(np.float32)
+            fw_ = smoothstep(gaussian_blur_float(fcounts / area, FLATS_WATER_SIGMA), FLATS_WATER_LO, FLATS_WATER_HI)
+            flats_wfield = (fw_ * prox).astype(np.float32)
+        del vsums, vcounts, fcounts
+        for ty in range(rows):
+            for tx in range(cols):
+                if (tx, ty) in exterior:
+                    continue
+                blk = (slice(ty * f8, (ty + 1) * f8), slice(tx * f8, (tx + 1) * f8))
+                if (forest and float(veg_strength[blk].max()) > 0.01) or (
+                    flats and float(flats_field[blk].max()) > 0.01
+                ):
+                    ftiles.add((tx, ty))
+        todo = sorted(set(todo) | ftiles, key=lambda t: (t[1], t[0]))
+        print(f"  forest/flats fields: {len(ftiles)} tiles, todo {len(todo)}, {time.time() - t0:.1f}s", flush=True)
+    if tile_filter is not None:
+        todo = [t for t in todo if tile_filter(*t)]
     stamp_path.write_text(stamp)
 
     # 2. apply
@@ -2977,13 +3052,26 @@ def polish_water(
                         axis=2,
                     )
                     vw = np.clip(upsample_distance(veg_weight, tx, ty, scale=FOREST_TONE_SCALE) / 0.05, 0.0, 1.0)
-                    strength = vw * np.clip(upsample_distance(prox, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
-                    out = vegetation_tone_match(arr, veg, target, strength)
+                    vs = np.clip(upsample_distance(veg_strength, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
+                    out = vegetation_tone_match(arr, veg, target, vw * vs)
             if is_water:
                 teal = is_teal_water(out) & wmask
                 out = tone_match_water(out, teal, ref=ref, radius=radius)
                 out, nf = fill_uncovered_water(out, wmask, pad_rgb=pad_rgb, ref=ref)
                 filled_px += nf
+            if flats and flats_field is not None:
+                fw = np.clip(upsample_distance(flats_field, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
+                fww = np.clip(upsample_distance(flats_wfield, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
+                if float(max(fw.max(), fww.max())) > 0.01:
+                    feat = is_featureless(out)
+                    if is_water:
+                        feat &= ~wmask
+                    # soft gate: flats plus thin lines enclosed by them
+                    gate = smoothstep(gaussian_blur_float(feat.astype(np.float32), FLATS_GATE_BLUR), 0.3, 0.65)
+                    teal = is_teal_water(out, max_lum=255.0)
+                    a = np.where(teal, fww, fw * gate)[:, :, None].astype(np.float32)
+                    vf0 = np.array(VIEW_FOG, dtype=np.float32)
+                    out = np.clip(np.round(out.astype(np.float32) * (1.0 - a) + vf0 * a), 0, 255).astype(np.uint8)
             if is_water or in_band:
                 # Water fades in every tile (the per-tile band test would leave a
                 # step where a band tile meets an interior one); land only in the band.
@@ -3128,6 +3216,11 @@ def main() -> None:
         help="after --polish-vignette: cross-fade washed land just inside the edge band to the clean staging (free, idempotent, no API)",
     )
     ap.add_argument(
+        "--polish-flats",
+        action="store_true",
+        help="with --polish-water/--polish-forest: fade featureless ground near the edge (flat fill, gray puddles, white lots) into the fog with a soft mask (free, idempotent)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
         default=None,
@@ -3220,7 +3313,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -3246,14 +3339,14 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
-        elif args.polish_water or args.polish_forest:
+        elif args.polish_water or args.polish_forest or args.polish_flats:
             if args.polish_water and not districts:
                 raise SystemExit("--polish-water needs --district chunks:tiles for the water masks")
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  bay water tone and fade / near-edge land → {dest}", flush=True)
             z0_present = polish_water(
                 dest, grid, districts, pad_rgb=pad_rgb, fade=fade,
-                water=args.polish_water, forest=args.polish_forest,
+                water=args.polish_water, forest=args.polish_forest, flats=args.polish_flats,
             )
         elif args.polish_edge:
             fade = args.fade if args.fade is not None else EDGE_FADE
