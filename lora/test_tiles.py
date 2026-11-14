@@ -1611,5 +1611,31 @@ class FlatsPolishTest(unittest.TestCase):
             self.assertTrue(np.array_equal(t1, again))
 
 
+class InlandForestToneTest(unittest.TestCase):
+    def test_forest_dominant_tiles_far_from_the_edge_are_matched(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            clean = dest / ".vignette-clean"
+            (dest / "0").mkdir(parents=True)
+            (clean / "0").mkdir(parents=True)
+            cols = 12
+            grid = {"ox": 0, "oy": 0, "cols": cols, "rows": 1}
+            yy, xx = np.mgrid[0:512, 0:512]
+            canopy = ((((xx * 7 + yy * 13) % 11) < 3) * 14.0)[:, :, None]
+            for tx in range(cols):
+                tone = (60, 110, 45) if tx % 2 == 0 else (85, 135, 60)
+                t = np.clip(np.array(tone, np.float32) - canopy, 0, 255).astype(np.uint8)
+                for d in (dest / "0", clean / "0"):
+                    Image.fromarray(t, "RGB").save(d / f"{tx}_0.webp", "WEBP", lossless=True)
+            field = np.full((32, cols * 32), -2000.0, np.float32)  # all deep interior
+            SF.polish_water(dest, grid, [], clean_dest=clean, field=field, noise_amp=0,
+                            water=False, forest=True)
+            a = np.asarray(Image.open(dest / "0" / "5_0.webp").convert("RGB")).astype(np.float32)
+            b = np.asarray(Image.open(dest / "0" / "6_0.webp").convert("RGB")).astype(np.float32)
+            before = abs(110 - 135)
+            seam = float(abs(a[:, -16:, 1].mean() - b[:, :16, 1].mean()))
+            self.assertLess(seam, before / 4, seam)
+            self.assertGreater(float(b[:, :, 1].std()), 3.0)
+
 if __name__ == "__main__":
     unittest.main()
