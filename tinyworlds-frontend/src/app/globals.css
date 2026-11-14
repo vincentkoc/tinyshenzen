@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "shadcn/tailwind.css";
+@import "./shadcn-tailwind.css";
 
 /* Every panel is a black enamel sign in both themes, so shadcn's dark-surface styles always apply.
    The theme itself (day / dusk) only changes the fog behind the map and the map's own tint: it is
