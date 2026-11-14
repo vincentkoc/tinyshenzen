@@ -168,9 +168,6 @@ export function habboGroundColor(ctx: GroundContext, kind: number, x: number, y:
  * no diamond grout and no hash speckles.
  */
 export function pixelsgGroundColor(ctx: GroundContext, kind: number, x: number, y: number, gi: number): number {
-  const a = x + 2 * y;
-  const b = x - 2 * y;
-  const patch = ((a >> 5) & 1) ^ ((b >> 5) & 1);
   switch (kind) {
     case G.Water:
     case G.Lake:
