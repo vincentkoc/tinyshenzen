@@ -1643,6 +1643,16 @@ class FoglinePolishTest(unittest.TestCase):
         arr = np.array([[SF.VIEW_FOG, (150, 150, 146), (70, 120, 50), (36, 88, 74), (40, 40, 40)]], np.uint8)
         self.assertEqual(SF.fog_like(arr).tolist(), [[True, True, False, False, False]])
 
+    def test_dithered_gray_ground_counts_as_fog(self):
+        # procedural staging ground: a checker of light and dark gray pixels
+        yy, xx = np.mgrid[0:64, 0:64]
+        lum = np.where((yy + xx) % 2 == 0, 190, 90).astype(np.uint8)
+        arr = np.repeat(lum[:, :, None], 3, axis=2)
+        self.assertLess(float(SF.fog_like(arr).mean()), 0.6)
+        self.assertEqual(float(SF._small_fog_mask(arr).mean()), 1.0)
+        forest = np.full((64, 64, 3), (60, 110, 50), dtype=np.uint8)
+        self.assertEqual(float(SF._small_fog_mask(forest).mean()), 0.0)
+
     def test_weight_erases_thin_lines_in_fog_but_keeps_dense_content(self):
         n, m = 128, 20
         ctx = np.ones((n + 2 * m, n + 2 * m), np.float32)

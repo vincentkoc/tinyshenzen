@@ -3148,7 +3148,7 @@ FOGLINE_MAX_CHROMA = 22
 FOGLINE_MIN_LUM = 95
 FOGLINE_NOISE = 0.08
 FOGLINE_NOISE_PERIOD = 160.0
-FOGLINE_VERSION = "fogline-1"
+FOGLINE_VERSION = "fogline-2"
 
 
 def fog_like(arr: np.ndarray) -> np.ndarray:
@@ -3160,9 +3160,12 @@ def fog_like(arr: np.ndarray) -> np.ndarray:
 
 
 def _small_fog_mask(arr: np.ndarray, k: int = FOGLINE_SCALE) -> np.ndarray:
+    """Fog-like test on k x k box means, so the procedural ground's
+    checker dither (and thin lines drawn over fog) count as fog."""
     h, w = arr.shape[:2]
-    m = fog_like(arr).astype(np.float32)
-    return m[: h - h % k, : w - w % k].reshape(h // k, k, w // k, k).mean(axis=(1, 3))
+    rgb = arr[: h - h % k, : w - w % k, :3].astype(np.float32)
+    small = rgb.reshape(h // k, k, w // k, k, 3).mean(axis=(1, 3))
+    return fog_like(np.round(small)).astype(np.float32)
 
 
 def fogline_weight(
@@ -3190,7 +3193,8 @@ def fogline_stamp() -> str:
     return (
         f"{FOGLINE_VERSION} sigma={FOGLINE_SIGMA} lo={FOGLINE_LO} hi={FOGLINE_HI} "
         f"chroma={FOGLINE_MAX_CHROMA} lum={FOGLINE_MIN_LUM} noise={FOGLINE_NOISE} "
-        f"period={FOGLINE_NOISE_PERIOD}\n"
+        f"period={FOGLINE_NOISE_PERIOD}"
+        f" mask=boxmean\n"
     )
 
 
