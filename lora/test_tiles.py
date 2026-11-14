@@ -1483,5 +1483,75 @@ class WaterPolishTest(unittest.TestCase):
                 self.assertLess(seam, inner + 1.5, (seam, inner))
 
 
+class ForestPolishTest(unittest.TestCase):
+    WASH = (150, 150, 146)   # older gray wash over the hills
+    FOREST = (70, 120, 50)   # clean staging
+
+    def test_forest_weight_is_one_near_the_edge_and_zero_deep(self):
+        d = np.array([-2000.0, -SF.FOREST_DEPTH, -700.0, -SF.FOREST_FULL, -100.0], np.float32)
+        w = SF.forest_weight(d)
+        self.assertEqual(float(w[0]), 0.0)
+        self.assertEqual(float(w[1]), 0.0)
+        self.assertTrue(0.0 < float(w[2]) < 1.0)
+        self.assertEqual(float(w[3]), 1.0)
+        self.assertEqual(float(w[4]), 1.0)
+
+    def test_vegetation_tone_match_removes_a_seam_step_and_keeps_texture(self):
+        yy, xx = np.mgrid[0:96, 0:96]
+        canopy = (((xx * 7 + yy * 13) % 11) < 3).astype(np.float32) * 14.0
+        tiles = []
+        for tone in ((60, 110, 45), (85, 135, 60)):
+            arr = np.clip(np.array(tone, np.float32)[None, None, :] - canopy[:, :, None], 0, 255).astype(np.uint8)
+            veg = SF.is_vegetation(arr)
+            self.assertTrue(veg.all())
+            target = np.full((96, 96, 3), (72, 122, 52), np.float32)
+            tiles.append(SF.vegetation_tone_match(arr, veg, target, radius=12).astype(np.float32))
+        a, b = tiles
+        seam = np.abs(a[:, -8:].reshape(-1, 3).mean(axis=0) - b[:, :8].reshape(-1, 3).mean(axis=0))
+        self.assertLess(float(seam.max()), 1.5, seam)
+        self.assertGreater(float(b[:, :, 1].std()), 4.0)  # canopy texture kept
+
+    def test_vegetation_excludes_bay_teal_and_gray_wash(self):
+        arr = np.array([[[36, 88, 74], [150, 150, 146], [70, 120, 50]]], np.uint8)
+        self.assertEqual(SF.is_vegetation(arr).tolist(), [[False, False, True]])
+
+    def _run(self, td, field, cols):
+        dest = Path(td) / "restyle"
+        clean = dest / ".vignette-clean"
+        (dest / "0").mkdir(parents=True)
+        (clean / "0").mkdir(parents=True)
+        grid = {"ox": 0, "oy": 0, "cols": cols, "rows": 1}
+        for tx in range(cols):
+            Image.fromarray(np.full((512, 512, 3), self.WASH, np.uint8), "RGB").save(
+                dest / "0" / f"{tx}_0.webp", "WEBP", lossless=True)
+            Image.fromarray(np.full((512, 512, 3), self.FOREST, np.uint8), "RGB").save(
+                clean / "0" / f"{tx}_0.webp", "WEBP", lossless=True)
+        kw = dict(clean_dest=clean, field=field, noise_amp=0, water=False, forest=True)
+        SF.polish_water(dest, grid, [], **kw)
+        return dest, grid, kw
+
+    def test_forest_restores_clean_land_near_the_edge_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            # tile 0 deep (field at its cap), tiles 1-2 ramp up to the band.
+            xs = np.arange(96, dtype=np.float32) * 16.0
+            field = np.repeat(np.clip(xs - 1600.0, -864.0, None)[None, :], 32, axis=0)
+            dest, grid, kw = self._run(td, field, 3)
+            t = [np.asarray(Image.open(dest / "0" / f"{tx}_0.webp").convert("RGB")).astype(int) for tx in range(3)]
+            self.assertTrue(np.array_equal(t[0], np.full_like(t[0], self.WASH)))  # deep: untouched
+            # near the band: clean land (the green-tone match may nudge it a little)
+            self.assertTrue(np.all(np.abs(t[2][:, -1] - np.array(self.FOREST)) <= 6))
+            # cross-fade is smooth: no real step at either seam (the per-tile
+            # green match bends a steep ramp a little at the seam)
+            for a, b in ((t[0], t[1]), (t[1], t[2])):
+                self.assertLessEqual(int(np.abs(a[:, -1] - b[:, 0]).max()), 8)
+            # idempotent: rerun from scratch reads the snapshot, not its own output
+            first = [x.copy() for x in t]
+            (dest / ".water-progress.jsonl").unlink()
+            SF.polish_water(dest, grid, [], **kw)
+            again = [np.asarray(Image.open(dest / "0" / f"{tx}_0.webp").convert("RGB")).astype(int) for tx in range(3)]
+            for a, b in zip(first, again):
+                self.assertTrue(np.array_equal(a, b))
+
+
 if __name__ == "__main__":
     unittest.main()
