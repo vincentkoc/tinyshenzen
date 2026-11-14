@@ -179,7 +179,9 @@ python3 lora/water_constrain.py \
 # --district flags) put the bay on one teal with its texture kept and
 # no tile-seam steps, give water its own fade to beige, and cross-fade
 # the gray-washed land just inside the edge to the clean staging.
-# Both are free and idempotent from snapshots.
+# --polish-flats (with them) fades featureless blotches near the edge
+# into the fog and evens forest greens inland too. All free and
+# idempotent from snapshots.
 # python3 lora/slice_frontend.py \
 #   --chunks /tmp/tinysz-core \
 #   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
@@ -187,7 +189,7 @@ python3 lora/water_constrain.py \
 #   --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
 #   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
 #   --polish-vignette
-# (then the same command with --polish-water --polish-forest)
+# (then the same command with --polish-water --polish-forest --polish-flats)
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
