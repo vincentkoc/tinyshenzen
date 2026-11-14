@@ -175,6 +175,11 @@ python3 lora/water_constrain.py \
 # from source. Do not run --polish immediately before it: the per-tile
 # feather is what made the quilted fade. --polish-edge is the earlier
 # global-fade attempt and is kept for the existing tests.
+# Afterwards, --polish-water --polish-forest (passed together, same
+# --district flags) put the bay on one teal with its texture kept and
+# no tile-seam steps, give water its own fade to beige, and cross-fade
+# the gray-washed land just inside the edge to the clean staging.
+# Both are free and idempotent from snapshots.
 # python3 lora/slice_frontend.py \
 #   --chunks /tmp/tinysz-core \
 #   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
@@ -182,6 +187,7 @@ python3 lora/water_constrain.py \
 #   --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
 #   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
 #   --polish-vignette
+# (then the same command with --polish-water --polish-forest)
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
