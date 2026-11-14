@@ -1553,5 +1553,63 @@ class ForestPolishTest(unittest.TestCase):
                 self.assertTrue(np.array_equal(a, b))
 
 
+
+class FlatsPolishTest(unittest.TestCase):
+    def test_featureless_finds_flat_fill_but_not_grain_sand_or_water(self):
+        arr = np.zeros((64, 64, 3), np.uint8)
+        arr[:, :16] = (200, 194, 182)                       # flat restyle fill
+        yy, xx = np.mgrid[0:64, 0:16]
+        blocks = (((xx // 8) + (yy // 8)) % 2) * 60
+        arr[:, 16:32] = np.clip(100 + blocks[:, :, None], 0, 255)  # drawn blocks (roofs, roads)
+        arr[:, 32:48] = (214, 196, 160)                     # sand
+        arr[:, 48:] = (36, 88, 74)                          # bay teal
+        f = SF.is_featureless(arr)
+        self.assertTrue(f[:, :8].all())
+        self.assertFalse(f[:, 24:28].any())
+        self.assertFalse(f[:, 36:44].any())
+        self.assertFalse(f[:, 52:].any())
+
+    def _setup(self, td, cols=4):
+        dest = Path(td) / "restyle"
+        clean = dest / ".vignette-clean"
+        (dest / "0").mkdir(parents=True)
+        (clean / "0").mkdir(parents=True)
+        grid = {"ox": 0, "oy": 0, "cols": cols, "rows": 1}
+        yy, xx = np.mgrid[0:512, 0:512]
+        grain = (((((xx // 8) + (yy // 8)) % 2) * 50))[:, :, None]
+        city = np.clip(np.full((512, 512, 3), (120, 110, 100)) + grain, 0, 255).astype(np.uint8)
+        for tx in range(cols):
+            t = city.copy()
+            if tx == 1:
+                t[:, :] = (200, 194, 182)  # flat blotch next to the edge
+            for d in (dest / "0", clean / "0"):
+                Image.fromarray(t, "RGB").save(d / f"{tx}_0.webp", "WEBP", lossless=True)
+        # band on the left (tile 0), interior to the right
+        xs = np.arange(cols * 32, dtype=np.float32) * 16.0
+        field = np.repeat((200.0 - xs)[None, :], 32, axis=0).astype(np.float32)
+        return dest, clean, grid, field, city
+
+    def test_flats_fade_into_fog_near_the_edge_and_leave_content(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest, clean, grid, field, city = self._setup(td)
+            kw = dict(clean_dest=clean, field=field, noise_amp=0, water=False, forest=False, flats=True)
+            SF.polish_water(dest, grid, [], **kw)
+            p1 = dest / "0" / "1_0.webp"
+            # fully fogged tiles are dropped (the viewer shows beige there)
+            t1 = (np.asarray(Image.open(p1).convert("RGB")).astype(int) if p1.exists()
+                  else np.full((512, 512, 3), SF.VIEW_FOG, int))
+            t3 = np.asarray(Image.open(dest / "0" / "3_0.webp").convert("RGB")).astype(int)
+            # the flat blotch moved toward viewer beige
+            self.assertGreater(float(t1[:, :, 0].mean()), 205.0)
+            # textured content far from the edge is untouched
+            self.assertTrue(np.array_equal(t3, city.astype(int)))
+            # idempotent from the snapshot
+            (dest / ".water-progress.jsonl").unlink()
+            SF.polish_water(dest, grid, [], **kw)
+            again = (np.asarray(Image.open(p1).convert("RGB")).astype(int) if p1.exists()
+                     else np.full((512, 512, 3), SF.VIEW_FOG, int))
+            self.assertTrue(np.array_equal(t1, again))
+
+
 if __name__ == "__main__":
     unittest.main()
