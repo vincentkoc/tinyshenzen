@@ -37,7 +37,10 @@ greens near the edge and on forest-dominant ground inland;
 `--polish-flats` fades featureless ground near the edge (flat fill,
 gray puddles, dithered blotches) and the water beside it into the fog
 with a soft cross-tile mask. All are free and idempotent, and run
-after `--polish-vignette`, passed together.
+after `--polish-vignette`, passed together. `--polish-fogline` runs
+last, on its own: near the edge it fades fog-dominated pixels (dashed
+traces in fogged ground, gray-washed windows, straight cut-offs) to
+beige with a feathered, noise-wobbled ramp.
 Higher zoom levels are rebuilt with viewer-fog padding so missing
 children do not become dark squares. Generated images are not
 committed.
@@ -3122,6 +3125,205 @@ def polish_water(
     return present
 
 
+# ---------------------------------------------------------------------------
+# --polish-fogline: clean the fog boundary (free, no API)
+#
+# After the other passes, three things still read as squares at the edge:
+# thin dashed lines left inside fogged ground, restyle windows that carry
+# a gray wash with a few tree dots, and straight forest/water edges where
+# a source window stops. Near the edge (the same proximity field as the
+# forest pass), pixels whose surroundings are mostly fog-like (low chroma,
+# light: beige fog, gray wash, flats) fade to viewer beige. Dominance is
+# measured on a cross-tile 1/4-resolution mask, so thin lines enclosed by
+# fog vanish, dense content stays, and the boundary is a feathered,
+# noise-wobbled ramp rather than a tile edge. Sources are a one-time
+# snapshot of dest (.fogline-src), so the pass is idempotent. Run it last.
+# ---------------------------------------------------------------------------
+
+FOGLINE_SCALE = 4
+FOGLINE_SIGMA = 6.0          # in 1/4-res pixels (~24 z0 px)
+FOGLINE_LO = 0.55
+FOGLINE_HI = 0.9
+FOGLINE_MAX_CHROMA = 22
+FOGLINE_MIN_LUM = 95
+FOGLINE_NOISE = 0.08
+FOGLINE_NOISE_PERIOD = 160.0
+FOGLINE_VERSION = "fogline-1"
+
+
+def fog_like(arr: np.ndarray) -> np.ndarray:
+    """Beige fog, gray wash and flat neutral ground (not water, not trees)."""
+    rgb = arr[:, :, :3].astype(np.int16)
+    chroma = rgb.max(axis=2) - rgb.min(axis=2)
+    lum = rgb.mean(axis=2)
+    return (chroma < FOGLINE_MAX_CHROMA) & (lum > FOGLINE_MIN_LUM)
+
+
+def _small_fog_mask(arr: np.ndarray, k: int = FOGLINE_SCALE) -> np.ndarray:
+    h, w = arr.shape[:2]
+    m = fog_like(arr).astype(np.float32)
+    return m[: h - h % k, : w - w % k].reshape(h // k, k, w // k, k).mean(axis=(1, 3))
+
+
+def fogline_weight(
+    context: np.ndarray,
+    *,
+    sigma: float = FOGLINE_SIGMA,
+    lo: float = FOGLINE_LO,
+    hi: float = FOGLINE_HI,
+    margin: int,
+    k: int = FOGLINE_SCALE,
+    noise: np.ndarray | None = None,
+    strength: np.ndarray | float = 1.0,
+) -> np.ndarray:
+    """Fog weight for the centre tile from a padded 1/4-res fog-like context."""
+    d = gaussian_blur_float(context.astype(np.float32), sigma)
+    n = (context.shape[0] - 2 * margin)
+    d = d[margin : margin + n, margin : margin + n]
+    up = np.array(Image.fromarray(d, mode="F").resize((n * k, n * k), Image.Resampling.BICUBIC), dtype=np.float32)
+    if noise is not None:
+        up = up + noise
+    return (smoothstep(up, lo, hi) * strength).astype(np.float32)
+
+
+def fogline_stamp() -> str:
+    return (
+        f"{FOGLINE_VERSION} sigma={FOGLINE_SIGMA} lo={FOGLINE_LO} hi={FOGLINE_HI} "
+        f"chroma={FOGLINE_MAX_CHROMA} lum={FOGLINE_MIN_LUM} noise={FOGLINE_NOISE} "
+        f"period={FOGLINE_NOISE_PERIOD}\n"
+    )
+
+
+def polish_fogline(
+    dest: Path,
+    grid: dict,
+    *,
+    field: np.ndarray | None = None,
+    pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    scale: int = VIGNETTE_SCALE,
+    lossless_z0: bool = True,
+    tile_filter=None,
+) -> set[tuple[int, int]]:
+    """Fade fog-dominated pixels near the edge to beige (see section notes)."""
+    cols, rows = grid["cols"], grid["rows"]
+    dest0 = dest / "0"
+    snap0 = dest / ".fogline-src" / "0"
+    snap0.mkdir(parents=True, exist_ok=True)
+    if field is None:
+        dist_path = dest / ".vignette-dist.npz"
+        if not dist_path.exists():
+            raise SystemExit("--polish-fogline needs the vignette field; run --polish-vignette first")
+        field = np.load(dist_path)["field"]
+    present = present_from_disk(dest, cols, rows)
+    vig_band, exterior = edge_band_from_field(field, grid, fade=fade, inset=inset, scale=scale)
+    prox = edge_proximity(grid, vig_band | exterior)
+    f8 = TILE // FOREST_TONE_SCALE
+    stamp_path = dest / ".fogline-stamp"
+    progress_path = dest / ".fogline-progress.jsonl"
+    stamp = fogline_stamp()
+    if stamp_path.exists() and stamp_path.read_text() != stamp:
+        print("  fogline parameters changed, redoing the pass", flush=True)
+        progress_path.unlink(missing_ok=True)
+
+    def source(tx: int, ty: int) -> np.ndarray | None:
+        p = snap0 / f"{tx}_{ty}.webp"
+        if not p.exists():
+            p = dest0 / f"{tx}_{ty}.webp"
+        if not p.exists():
+            return None
+        with Image.open(p) as im:
+            return np.asarray(im.convert("RGB"))
+
+    zone = set()
+    for ty in range(rows):
+        for tx in range(cols):
+            if (tx, ty) in exterior:
+                continue
+            if float(prox[ty * f8 : (ty + 1) * f8, tx * f8 : (tx + 1) * f8].max()) > 0.01:
+                zone.add((tx, ty))
+    # 1. 1/4-res fog-like masks (missing tiles count as fog: the viewer shows beige)
+    n = TILE // FOGLINE_SCALE
+    small: dict[tuple[int, int], np.ndarray] = {}
+    need = set()
+    for tx, ty in zone:
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                need.add((tx + dx, ty + dy))
+    t0 = time.time()
+    for i, (tx, ty) in enumerate(sorted(need), 1):
+        arr = source(tx, ty) if 0 <= tx < cols and 0 <= ty < rows else None
+        if arr is not None:
+            small[(tx, ty)] = _small_fog_mask(arr)
+        if i % 1000 == 0:
+            print(f"  fogline masks {i}/{len(need)}, {time.time() - t0:.1f}s", flush=True)
+    ones = np.ones((n, n), dtype=np.float32)
+    stamp_path.write_text(stamp)
+    todo = sorted(zone, key=lambda t: (t[1], t[0]))
+    if tile_filter is not None:
+        todo = [t for t in todo if tile_filter(*t)]
+    print(f"  fogline zone {len(zone)} tiles, todo {len(todo)}, {time.time() - t0:.1f}s", flush=True)
+
+    done = _load_progress(progress_path)
+    margin = int(math.ceil(3 * FOGLINE_SIGMA)) + 2
+    vf = np.array(VIEW_FOG, dtype=np.float32)
+    changed = removed = 0
+    t0 = time.time()
+    prog = open(progress_path, "a")
+    try:
+        for i, (tx, ty) in enumerate(todo, 1):
+            if (tx, ty) in done:
+                continue
+            arr = source(tx, ty)
+            if arr is None:
+                prog.write(f"{tx},{ty}\n")
+                continue
+            big = np.concatenate(
+                [np.concatenate([small.get((tx + dx, ty + dy), ones) for dx in (-1, 0, 1)], axis=1)
+                 for dy in (-1, 0, 1)],
+                axis=0,
+            )
+            ctx = big[n - margin : 2 * n + margin, n - margin : 2 * n + margin]
+            strength = np.clip(upsample_distance(prox, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
+            noise = fade_boundary_noise(tx, ty, amplitude=FOGLINE_NOISE, period=FOGLINE_NOISE_PERIOD)
+            w = fogline_weight(ctx, margin=margin, noise=noise, strength=strength)
+            dest_path = dest0 / f"{tx}_{ty}.webp"
+            snap_path = snap0 / f"{tx}_{ty}.webp"
+            if float(w.max()) <= 0.01:
+                out = arr
+            else:
+                out = arr.astype(np.float32) * (1.0 - w[:, :, None]) + vf * w[:, :, None]
+                out = np.clip(np.round(out), 0, 255).astype(np.uint8)
+            if dest_path.exists() and not snap_path.exists():
+                shutil.copy2(dest_path, snap_path)
+            if float(np.abs(out.astype(np.int16) - np.array(VIEW_FOG)).max()) <= 3:
+                if dest_path.exists():
+                    dest_path.unlink()
+                    removed += 1
+                present.discard((tx, ty))
+            else:
+                if dest_path.exists():
+                    with Image.open(dest_path) as im:
+                        cur = np.asarray(im.convert("RGB"))
+                    if int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) > 1:
+                        _atomic_save_webp(Image.fromarray(out, "RGB"), dest_path, lossless=lossless_z0)
+                        changed += 1
+                else:
+                    _atomic_save_webp(Image.fromarray(out, "RGB"), dest_path, lossless=lossless_z0)
+                present.add((tx, ty))
+            prog.write(f"{tx},{ty}\n")
+            if i % 50 == 0:
+                prog.flush()
+            if i % 500 == 0 or i == len(todo):
+                print(f"  fogline {i}/{len(todo)} changed={changed} removed={removed} {time.time() - t0:.1f}s", flush=True)
+    finally:
+        prog.flush()
+        prog.close()
+    print(f"  fogline done: present={len(present)} changed={changed} removed={removed}", flush=True)
+    return present
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
@@ -3221,6 +3423,11 @@ def main() -> None:
         help="with --polish-water/--polish-forest: fade featureless ground near the edge (flat fill, gray puddles, white lots) into the fog with a soft mask (free, idempotent)",
     )
     ap.add_argument(
+        "--polish-fogline",
+        action="store_true",
+        help="last: fade fog-dominated pixels near the edge (dashed traces, gray-washed windows, straight cut-offs) to beige with a feathered, wobbled ramp (free, idempotent)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
         default=None,
@@ -3313,7 +3520,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -3339,6 +3546,10 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
+        elif args.polish_fogline:
+            fade = args.fade if args.fade is not None else VIGNETTE_FADE
+            print(f"  fog boundary cleanup → {dest}", flush=True)
+            z0_present = polish_fogline(dest, grid, pad_rgb=pad_rgb, fade=fade)
         elif args.polish_water or args.polish_forest or args.polish_flats:
             if args.polish_water and not districts:
                 raise SystemExit("--polish-water needs --district chunks:tiles for the water masks")
