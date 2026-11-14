@@ -1291,5 +1291,197 @@ class VignettePolishTest(unittest.TestCase):
             self.assertTrue(np.allclose(out, self.GREEN, atol=2), "released tile must be unfaded clean")
 
 
+class WaterPolishTest(unittest.TestCase):
+    """--polish-water: one bay tone, its own fade, idempotent from sources."""
+
+    PAD = (0x1A, 0x1E, 0x1C)
+    REF = SF.WATER_REF
+    ALT = (47, 109, 88)
+    GREEN = (74, 110, 56)
+
+    def test_teal_excludes_vegetation_and_fog_washed_teal(self):
+        arr = np.zeros((4, 4, 3), dtype=np.uint8)
+        arr[0, 0] = self.REF
+        arr[0, 1] = self.ALT
+        arr[1, 0] = self.GREEN            # dark vegetation
+        arr[1, 1] = (120, 150, 140)       # teal washed by restyle fog
+        arr[2, 0] = SF.VIEW_FOG
+        teal = SF.is_teal_water(arr)
+        self.assertTrue(teal[0, 0] and teal[0, 1])
+        self.assertFalse(teal[1, 0])
+        self.assertFalse(teal[1, 1])
+        self.assertFalse(teal[2, 0])
+
+    def _wavy(self, tone, h=64, w=64):
+        arr = np.zeros((h, w, 3), dtype=np.float32)
+        arr[:] = tone
+        yy, xx = np.mgrid[0:h, 0:w]
+        wave = ((xx + yy) % 4 == 0).astype(np.float32) * 6.0
+        return np.clip(arr + wave[:, :, None], 0, 255).astype(np.uint8)
+
+    def test_tone_match_removes_a_tile_seam_step_and_keeps_texture(self):
+        # Two neighbouring tiles painted in different flat tones.
+        left_in, right_in = self._wavy(self.REF), self._wavy(self.ALT)
+        outs = []
+        for arr in (left_in, right_in):
+            teal = SF.is_teal_water(arr)
+            self.assertTrue(teal.all())
+            outs.append(SF.tone_match_water(arr, teal).astype(np.float32))
+        left, right = outs
+        # No step across the seam (last column of one tile vs first of the next).
+        seam = np.abs(left[:, -1].mean(axis=0) - right[:, 0].mean(axis=0))
+        self.assertLess(float(seam.max()), 1.5, seam)
+        self.assertLess(float(np.abs(right.reshape(-1, 3).mean(axis=0) - np.array(self.REF)).max()), 1.0)
+        # Wave texture survives.
+        self.assertGreater(float(right[:, :, 1].std()), 2.0)
+
+    def test_tone_match_leaves_land_untouched(self):
+        arr = self._wavy(self.ALT)
+        arr[:, 40:] = (90, 120, 40)  # vegetation
+        teal = SF.is_teal_water(arr)
+        self.assertFalse(teal[:, 40:].any())
+        out = SF.tone_match_water(arr, teal)
+        self.assertTrue(np.array_equal(out[:, 40:], arr[:, 40:]))
+        # Water near the shore is pulled to ref too, not dragged by the land.
+        self.assertLess(abs(float(out[:, 30:40, 1].mean()) - self.REF[1]), 2.0)
+
+    def test_fill_replaces_fog_holes_in_water_but_not_land_or_sand(self):
+        arr = np.zeros((32, 32, 3), dtype=np.uint8)
+        arr[:] = self.REF
+        arr[4:12, 4:12] = SF.VIEW_FOG          # restyle fog hole in the bay
+        arr[14:18, 4:12] = (120, 150, 140)      # fog-washed teal
+        arr[20:28, 4:12] = (214, 196, 160)      # sand on the coast, under the mask
+        water = np.ones((32, 32), dtype=bool)
+        water[:, 24:] = False
+        arr[:, 24:] = SF.VIEW_FOG               # beige outside the mask stays
+        out, n = SF.fill_uncovered_water(arr, water)
+        self.assertGreater(n, 0)
+        self.assertTrue(np.all(out[4:12, 4:12] == self.REF))
+        self.assertTrue(np.all(out[14:18, 4:12] == self.REF))
+        self.assertTrue(np.all(out[20:28, 4:12] == (214, 196, 160)))
+        self.assertTrue(np.all(out[:, 24:] == SF.VIEW_FOG))
+
+    def test_water_body_drops_small_lakes_and_dilates_the_bay(self):
+        frac = {}
+        for tx in range(10):
+            for ty in range(3):
+                frac[(tx, ty)] = 0.9            # 30-tile bay
+        frac[(30, 30)] = 0.9                    # lone reservoir
+        frac[(31, 30)] = 0.9
+        body = SF.water_body_tiles(frac, min_frac=0.2, min_tiles=20, dilate=2)
+        self.assertIn((0, 0), body)
+        self.assertIn((-2, 4), body)            # dilated
+        self.assertNotIn((30, 30), body)
+
+    def test_water_alpha_never_fades_water_past_the_land_vignette(self):
+        dist = np.linspace(-400, 900, 256, dtype=np.float32)[None, :].repeat(4, axis=0)
+        # Water body far inside (a lake): water distance very negative.
+        lake = np.full_like(dist, -2000.0)
+        frac = np.ones_like(dist)
+        a = SF.water_alpha(dist, lake, frac, fade=768, inset=32, water_inset=256)
+        self.assertLess(float(a.max()), 1e-6)
+        # Open water where the body edge is near the land edge: capped by land.
+        a2 = SF.water_alpha(dist, dist, frac, fade=768, inset=32, water_inset=256)
+        a_land = SF.fade_alpha(dist, 768, 32)
+        self.assertTrue(np.all(a2 <= a_land + 1e-6))
+        self.assertGreater(float(a2[0, -1]), 0.99)
+        # Land pixels follow the land vignette exactly.
+        a3 = SF.water_alpha(dist, lake, np.zeros_like(dist), fade=768, inset=32, water_inset=256)
+        self.assertTrue(np.allclose(a3, a_land))
+
+    def test_water_field_closes_fog_holes_inside_the_bay(self):
+        counts = np.full((96, 96), 256.0, dtype=np.float32)
+        counts[:, 70:] = 0.0                    # open sea ends at x=70
+        counts[30:40, 20:34] = 0.0              # a fog hole inside the bay
+        field = SF.build_water_field(counts, fade=128, water_inset=64, blur=4, open_r=2, close_r=10, dist_blur=0)
+        self.assertLess(float(field[35, 27]), 0.0, "hole should be inside the water body")
+        self.assertGreater(float(field[48, 90]), 0.0)
+
+    def test_polish_water_is_idempotent_and_keeps_interior_land(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            dest = root / "restyle"
+            clean = dest / ".vignette-clean"
+            (dest / "0").mkdir(parents=True)
+            (clean / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 3, "rows": 1}
+            land = np.full((512, 512, 3), self.GREEN, dtype=np.uint8)
+            land[:, :, 0] = 150  # warm land, not teal
+            # tile 0: interior, land top / ALT water bottom
+            t0 = land.copy()
+            t0[256:] = self.ALT
+            Image.fromarray(t0, "RGB").save(dest / "0" / "0_0.webp", "WEBP", lossless=True)
+            Image.fromarray(t0, "RGB").save(clean / "0" / "0_0.webp", "WEBP", lossless=True)
+            # tile 1: REF water with a fog hole
+            t1 = np.full((512, 512, 3), self.REF, dtype=np.uint8)
+            t1[256:, 100:300] = SF.VIEW_FOG
+            Image.fromarray(t1, "RGB").save(dest / "0" / "1_0.webp", "WEBP", lossless=True)
+            Image.fromarray(t1, "RGB").save(clean / "0" / "1_0.webp", "WEBP", lossless=True)
+            # distance field: everything deep inside (no fade in this test)
+            field = np.full((32, 96), -2000.0, dtype=np.float32)
+            water_mask = np.zeros((512, 1536), dtype=np.uint8)
+            water_mask[256:, :512] = 255
+            water_mask[:, 512:1024] = 255
+
+            orig = SF.water_mask_roi
+            def fake_roi(districts, left, top, tw=512, th=512):
+                return water_mask[top : top + th, left : left + tw]
+            SF.water_mask_roi = fake_roi
+            try:
+                kw = dict(clean_dest=clean, field=field, min_frac=0.2, min_tiles=1, dilate=1, noise_amp=0)
+                SF.polish_water(dest, grid, [], **kw)
+                a0 = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB"))
+                a1 = np.asarray(Image.open(dest / "0" / "1_0.webp").convert("RGB"))
+                # Force a full redo: it must read the snapshot, not its own output.
+                (dest / ".water-progress.jsonl").unlink()
+                SF.polish_water(dest, grid, [], **kw)
+                b0 = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB"))
+                b1 = np.asarray(Image.open(dest / "0" / "1_0.webp").convert("RGB"))
+            finally:
+                SF.water_mask_roi = orig
+            # land kept exactly
+            self.assertTrue(np.array_equal(a0[:200], t0[:200]))
+            # both tiles' water now one tone, close to REF, and hole filled
+            w0 = a0[300:, :].reshape(-1, 3).astype(np.float32).mean(axis=0)
+            w1 = a1[300:, :].reshape(-1, 3).astype(np.float32).mean(axis=0)
+            self.assertLess(float(np.abs(w0 - w1).max()), 4.0, (w0, w1))
+            self.assertFalse(np.any(np.all(np.abs(a1.astype(int) - SF.VIEW_FOG) <= 4, axis=2)))
+            # idempotent
+            self.assertTrue(np.array_equal(a0, b0))
+            self.assertTrue(np.array_equal(a1, b1))
+
+    def test_water_fade_is_continuous_across_band_and_interior_tiles(self):
+        # A band tile above an interior tile: the water fade must not step at the seam.
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            clean = dest / ".vignette-clean"
+            (dest / "0").mkdir(parents=True)
+            (clean / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 1, "rows": 3}
+            water_t = np.full((512, 512, 3), self.REF, dtype=np.uint8)
+            for ty in range(3):
+                for d in (dest / "0", clean / "0"):
+                    Image.fromarray(water_t, "RGB").save(d / f"0_{ty}.webp", "WEBP", lossless=True)
+            # field: deep at the top, rising to the edge at the bottom
+            yy = np.arange(96, dtype=np.float32)[:, None] * 16.0
+            field = np.repeat(yy - 900.0, 32, axis=1).astype(np.float32)
+            orig = SF.water_mask_roi
+            SF.water_mask_roi = lambda districts, left, top, tw=512, th=512: np.full((th, tw), 255, np.uint8)
+            try:
+                SF.polish_water(dest, grid, [], clean_dest=clean, field=field, min_frac=0.2,
+                                min_tiles=1, dilate=1, noise_amp=0)
+            finally:
+                SF.water_mask_roi = orig
+            tiles = []
+            for ty in range(3):
+                p = dest / "0" / f"0_{ty}.webp"
+                tiles.append(np.asarray(Image.open(p).convert("RGB")).astype(np.float32)
+                             if p.exists() else np.full((512, 512, 3), SF.VIEW_FOG, np.float32))
+            for a, b in zip(tiles, tiles[1:]):
+                seam = float(np.abs(a[-1].mean(axis=0) - b[0].mean(axis=0)).max())
+                inner = float(np.abs(a[-1].mean(axis=0) - a[-2].mean(axis=0)).max())
+                self.assertLess(seam, inner + 1.5, (seam, inner))
+
+
 if __name__ == "__main__":
     unittest.main()
