@@ -1637,5 +1637,53 @@ class InlandForestToneTest(unittest.TestCase):
             self.assertLess(seam, before / 4, seam)
             self.assertGreater(float(b[:, :, 1].std()), 3.0)
 
+
+class FoglinePolishTest(unittest.TestCase):
+    def test_fog_like_is_light_and_neutral_only(self):
+        arr = np.array([[SF.VIEW_FOG, (150, 150, 146), (70, 120, 50), (36, 88, 74), (40, 40, 40)]], np.uint8)
+        self.assertEqual(SF.fog_like(arr).tolist(), [[True, True, False, False, False]])
+
+    def test_weight_erases_thin_lines_in_fog_but_keeps_dense_content(self):
+        n, m = 128, 20
+        ctx = np.ones((n + 2 * m, n + 2 * m), np.float32)
+        ctx[m + 40, m : m + n] = 0.0               # a thin dashed trace inside fog
+        ctx[m + 80 :, m : m + n] = 0.0             # dense content at the bottom
+        w = SF.fogline_weight(ctx, margin=m, lo=0.55, hi=0.9)
+        self.assertEqual(w.shape, (512, 512))
+        self.assertGreater(float(w[40 * 4 + 1, 256]), 0.6)    # the line fades
+        self.assertLess(float(w[500, 256]), 0.05)            # deep content stays
+        # feathered boundary, not a step
+        col = w[300:340, 256]
+        self.assertLess(float(np.abs(np.diff(col)).max()), 0.2)
+
+    def test_polish_fogline_fades_gray_window_and_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            (dest / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 3, "rows": 1}
+            yy, xx = np.mgrid[0:512, 0:512]
+            canopy = ((((xx * 7 + yy * 13) % 11) < 3) * 14.0)[:, :, None]
+            forest = np.clip(np.array((70, 120, 50), np.float32) - canopy, 0, 255).astype(np.uint8)
+            gray = np.full((512, 512, 3), (150, 150, 146), np.uint8)
+            gray[::37, ::41] = (70, 120, 50)           # a few tree dots on the wash
+            tiles = {0: forest, 1: gray, 2: forest}
+            for tx, t in tiles.items():
+                Image.fromarray(t, "RGB").save(dest / "0" / f"{tx}_0.webp", "WEBP", lossless=True)
+            # tile 1 sits in the band (fog proximity 1 there), the field is deep elsewhere
+            field = np.full((32, 96), -2000.0, np.float32)
+            field[:, 32:64] = 100.0
+            SF.polish_fogline(dest, grid, field=field)
+            p1 = dest / "0" / "1_0.webp"
+            t1 = (np.asarray(Image.open(p1).convert("RGB")).astype(int) if p1.exists()
+                  else np.full((512, 512, 3), SF.VIEW_FOG, int))
+            self.assertGreater(float(t1[200:300, 200:300].mean()), 205.0)  # gray wash now beige
+            t0 = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB")).astype(int)
+            self.assertLess(float(np.abs(t0[:, :200] - forest[:, :200].astype(int)).mean()), 1.0)
+            (dest / ".fogline-progress.jsonl").unlink()
+            SF.polish_fogline(dest, grid, field=field)
+            again = (np.asarray(Image.open(p1).convert("RGB")).astype(int) if p1.exists()
+                     else np.full((512, 512, 3), SF.VIEW_FOG, int))
+            self.assertTrue(np.array_equal(t1, again))
+
 if __name__ == "__main__":
     unittest.main()
