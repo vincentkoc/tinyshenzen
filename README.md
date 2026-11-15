@@ -7,7 +7,7 @@ An isometric pixel-art map of Shenzhen you can pan and zoom, from Shekou to Luoh
 It is built from open data and drawn in a fine, naturalistic miniature style inspired by
 maps such as Pixel Singapore.
 
-![Tiny Shenzhen: the restyled Nanshan–Futian–Luohu map](docs/images/tinyshenzen-core.webp)
+![Tiny Shenzhen in the viewer: Houhai, China Resources Headquarters, the Shenzhen Bay Sports Center and Shenzhen Bay Park](docs/images/tinyshenzen-core.webp)
 
 Tiny Shenzhen is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT,
 © 2026 Nihey Takizawa). It uses the same pipeline and viewer, with a Shenzhen city
