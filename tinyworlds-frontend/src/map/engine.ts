@@ -23,6 +23,15 @@ import {
   type Sight,
   type SightShape,
 } from "./sights";
+import {
+  addSample,
+  aheadTiles,
+  emptyEstimate,
+  initialPolicy,
+  policyFor,
+  type LoadPolicy,
+  type NetworkEstimate,
+} from "./network";
 import { levelForScale, pinLevels, planTiles, Pyramid, tileKey, type TileRequest } from "./tiles";
 
 /**
@@ -75,6 +84,8 @@ export interface EngineEvents {
   hood: (name: string | null) => void;
   /** the lit sight changed: hovered, pinned (a click or a tap), or none */
   sight: (shown: { id: string; pinned: boolean } | null) => void;
+  /** how much of the view is sharp, for a quiet loading mark */
+  coverage: (info: { ready: number; total: number; loading: number }) => void;
 }
 
 export interface EngineOptions {
@@ -99,6 +110,9 @@ interface SightPicture {
 
 interface Tile {
   key: string;
+  z: number;
+  tx: number;
+  ty: number;
   state: "loading" | "ready" | "error";
   bitmap: ImageBitmap | null;
   readyAt: number;
@@ -111,9 +125,7 @@ interface Tile {
 
 type Wanted = TileRequest;
 
-const MAX_LOADS = 6;
 const FADE_MS = 180;
-const STALE_MS = 700; // a download nobody has asked for in this long is cancelled
 const SETTLE_MS = 220;
 const ZOOM_STEP = 1.5;
 const NICE_SCALES = [0.125, 0.25, 0.5, 1, 1.5, 2, 3, 4];
@@ -179,6 +191,17 @@ export class MapEngine {
   private readonly tiles = new Map<string, Tile>();
   private readonly tries = new Map<string, number>();
   private inflight = 0;
+  private basePolicy: LoadPolicy = initialPolicy();
+  private policy: LoadPolicy = initialPolicy();
+  private estimate: NetworkEstimate = emptyEstimate();
+  private vx = 0; // CSS px / s, right and down positive
+  private vy = 0;
+  private lastViewX = 0;
+  private lastViewY = 0;
+  private lastViewT = 0;
+  private planZ = 0;
+  private readonly keepKeys = new Set<string>();
+  private lastCoverage = "";
 
   // motion
   private inertia: { vx: number; vy: number } | null = null;
@@ -239,6 +262,7 @@ export class MapEngine {
     settle: new Set(),
     hood: new Set(),
     sight: new Set(),
+    coverage: new Set(),
   };
   private readonly resizeObserver: ResizeObserver;
 
@@ -251,6 +275,11 @@ export class MapEngine {
     this.reducedMotion = options.reducedMotion ?? false;
     this.projection = createProjection(options.manifest.geo);
     this.pyramid = new Pyramid(options.manifest);
+    this.basePolicy = initialPolicy(
+      typeof location !== "undefined" ? location.hostname : undefined,
+      readConnection(),
+    );
+    this.policy = { ...this.basePolicy };
 
     const ctx = this.canvas.getContext("2d");
     const mctx = this.marks.getContext("2d");
@@ -596,6 +625,57 @@ export class MapEngine {
     this.maxTiles = clamp(cols * rows * 3, 64, 320);
   }
 
+  private trackMotion(now: number): void {
+    const v = this.view;
+    if (this.lastViewT) {
+      const dt = now - this.lastViewT;
+      if (dt > 0) {
+        const instVx = ((v.x - this.lastViewX) * v.scale * 1000) / dt;
+        const instVy = ((v.y - this.lastViewY) * v.scale * 1000) / dt;
+        this.vx = this.vx * 0.55 + instVx * 0.45;
+        this.vy = this.vy * 0.55 + instVy * 0.45;
+      }
+    }
+    this.lastViewX = v.x;
+    this.lastViewY = v.y;
+    this.lastViewT = now;
+    if (!this.inMotion) {
+      this.vx *= 0.5;
+      this.vy *= 0.5;
+      if (Math.hypot(this.vx, this.vy) < 20) {
+        this.vx = 0;
+        this.vy = 0;
+      }
+    }
+  }
+
+  private refreshPolicy(): void {
+    const speed = Math.hypot(this.vx, this.vy);
+    this.policy = policyFor(this.basePolicy, this.estimate, this.inMotion, speed);
+  }
+
+  private emitCoverage(): void {
+    let total = 0;
+    let ready = 0;
+    let loading = 0;
+    const z = this.planZ;
+    const range = this.pyramid.range(z, this.view);
+    for (let ty = range.ty0; ty <= range.ty1; ty++) {
+      for (let tx = range.tx0; tx <= range.tx1; tx++) {
+        if (!this.pyramid.has(z, tx, ty)) continue;
+        total++;
+        const tile = this.tiles.get(tileKey(z, tx, ty));
+        if (tile?.state === "ready" && tile.bitmap) ready++;
+        else if (tile?.state === "loading") loading++;
+      }
+    }
+    const key = `${ready}/${total}/${loading}`;
+    if (key === this.lastCoverage) return;
+    this.lastCoverage = key;
+    const info = { ready, total, loading };
+    for (const listener of this.listeners.coverage) listener(info);
+  }
+
   /** Keeps the view on the map and refreshes the visible rectangle. */
   private constrain(): void {
     const v = this.view;
@@ -631,6 +711,11 @@ export class MapEngine {
     return !!(this.inertia || this.zoomTarget || this.flight);
   }
 
+  /** A drag, a glide, a zoom or a flight: the view is not at rest. */
+  private get inMotion(): boolean {
+    return !!(this.drag || this.inertia || this.zoomTarget || this.flight);
+  }
+
   // ---- frame loop ------------------------------------------------------------------------
 
   private readonly frame = (now: number): void => {
@@ -642,6 +727,7 @@ export class MapEngine {
 
     this.advance(now, dt);
     this.constrain();
+    this.trackMotion(now);
     this.dropSightsOutOfView();
 
     const lifeRuns = this.life && this.sceneLayers.size > 0 && !this.reducedMotion;
@@ -750,6 +836,8 @@ export class MapEngine {
       if (tile.state === "error" && now >= tile.retryAt) this.tiles.delete(key);
     }
 
+    this.refreshPolicy();
+    const ahead = aheadTiles(this.policy.ring, this.vx, this.vy);
     const plan = planTiles(
       pyramid,
       v,
@@ -758,7 +846,19 @@ export class MapEngine {
         const tile = this.tiles.get(key);
         return tile?.state === "ready" && !!tile.bitmap;
       },
+      {
+        ring: this.policy.ring,
+        aheadTx: ahead.aheadTx,
+        aheadTy: ahead.aheadTy,
+        deferNative: this.policy.deferNative,
+        aimX: v.x + (this.vx / Math.max(v.scale, 1e-6)) * 0.25,
+        aimY: v.y + (this.vy / Math.max(v.scale, 1e-6)) * 0.25,
+      },
     );
+    this.keepKeys.clear();
+    for (const r of plan.retain) this.keepKeys.add(tileKey(r.z, r.tx, r.ty));
+    for (const w of plan.wanted) this.keepKeys.add(tileKey(w.z, w.tx, w.ty));
+    this.planZ = plan.z;
     for (const r of plan.retain) {
       const tile = this.tiles.get(tileKey(r.z, r.tx, r.ty));
       if (!tile) continue;
@@ -810,6 +910,7 @@ export class MapEngine {
         }
       }
     }
+    this.emitCoverage();
     return fading;
   }
 
@@ -868,18 +969,23 @@ export class MapEngine {
     }
   }
 
-  /** Coarse overview tiles are small: pin them, so a pan always has something to show. */
+  /** The single coarsest tile is tiny: pin it so the whole map has a stand-in at once. */
   private preloadBase(): void {
     const now = performance.now();
-    for (const z of pinLevels(this.pyramid)) {
-      for (const { tx, ty } of this.pyramid.all(z)) this.load(z, tx, ty, now, true);
+    // finerCap 0: only the top of the pyramid, not every coarse level of the city
+    for (const z of pinLevels(this.pyramid, 40, 0)) {
+      for (const { tx, ty } of this.pyramid.all(z)) this.load(z, tx, ty, now, true, true);
     }
   }
 
   /** Starts the nearest downloads, and cancels the ones the view has moved away from. */
   private pump(now: number): void {
-    for (const tile of this.tiles.values()) {
-      if (tile.state === "loading" && !tile.pinned && now - tile.wantedAt > STALE_MS) {
+    const staleMs = this.policy.staleMs;
+    for (const tile of [...this.tiles.values()]) {
+      if (tile.state !== "loading" || tile.pinned) continue;
+      const kept = this.keepKeys.has(tile.key);
+      const zoomedPast = tile.z < this.planZ && !kept;
+      if (!kept && (zoomedPast || now - tile.wantedAt > staleMs)) {
         tile.abort?.abort();
         this.tiles.delete(tile.key);
         this.inflight--;
@@ -888,17 +994,27 @@ export class MapEngine {
     if (this.wanted.length === 0) return;
     this.wanted.sort((a, b) => a.pri - b.pri || a.dist - b.dist);
     for (const w of this.wanted) {
-      if (this.inflight >= MAX_LOADS) break;
-      this.load(w.z, w.tx, w.ty, now, false);
+      if (this.inflight >= this.policy.maxLoads) break;
+      this.load(w.z, w.tx, w.ty, now, false, w.pri === 0);
     }
   }
 
-  private load(z: number, tx: number, ty: number, now: number, pinned: boolean): void {
+  private load(
+    z: number,
+    tx: number,
+    ty: number,
+    now: number,
+    pinned: boolean,
+    high = false,
+  ): void {
     const key = tileKey(z, tx, ty);
     if (this.tiles.has(key)) return;
     const abort = new AbortController();
     const tile: Tile = {
       key,
+      z,
+      tx,
+      ty,
       state: "loading",
       bitmap: null,
       readyAt: 0,
@@ -911,12 +1027,19 @@ export class MapEngine {
     this.tiles.set(key, tile);
     this.inflight++;
 
-    fetch(this.tileUrl(z, tx, ty), { signal: abort.signal })
+    const started = performance.now();
+    fetch(this.tileUrl(z, tx, ty), {
+      signal: abort.signal,
+      priority: pinned || high ? "high" : "low",
+    } as RequestInit)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.blob();
       })
-      .then((blob) => createImageBitmap(blob))
+      .then((blob) => {
+        this.estimate = addSample(this.estimate, blob.size, performance.now() - started);
+        return createImageBitmap(blob);
+      })
       .then((bitmap) => {
         if (this.destroyed || this.tiles.get(key) !== tile) {
           bitmap.close();
@@ -1503,5 +1626,25 @@ export class MapEngine {
     this.measure();
     this.constrain();
     this.invalidate();
+  };
+}
+
+/** The browser's Network Information hint, when the engine has one. */
+function readConnection(): {
+  effectiveType?: string;
+  downlinkMbps?: number;
+  rttMs?: number;
+} | null {
+  if (typeof navigator === "undefined") return null;
+  const conn = (
+    navigator as Navigator & {
+      connection?: { effectiveType?: string; downlink?: number; rtt?: number };
+    }
+  ).connection;
+  if (!conn) return null;
+  return {
+    effectiveType: conn.effectiveType,
+    downlinkMbps: conn.downlink,
+    rttMs: conn.rtt,
   };
 }
