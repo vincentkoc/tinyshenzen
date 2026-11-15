@@ -47,11 +47,19 @@ interface SettingsPanelProps {
   onChange: (patch: Partial<Prefs>) => void;
   /** the world has outlines to draw (hoods.json is not empty) */
   hoodLines: boolean;
+  /** the world has ferries or flights to draw (life.json is not empty) */
+  hasLife: boolean;
   /** the world has a restyled tile pyramid next to the procedural one */
   hasRestyle?: boolean;
 }
 
-export function SettingsPanel({ prefs, onChange, hoodLines, hasRestyle }: SettingsPanelProps) {
+export function SettingsPanel({
+  prefs,
+  onChange,
+  hoodLines,
+  hasLife,
+  hasRestyle,
+}: SettingsPanelProps) {
   const strengthId = useId();
   const { t, copy } = useI18n();
   const keys: [string[], string][] = [
@@ -105,7 +113,9 @@ export function SettingsPanel({ prefs, onChange, hoodLines, hasRestyle }: Settin
           </div>
         )}
       </Row>
-      <Row label={t.settings.life} checked={prefs.life} onChange={(life) => onChange({ life })} />
+      {hasLife && (
+        <Row label={t.settings.life} checked={prefs.life} onChange={(life) => onChange({ life })} />
+      )}
       {hasRestyle && (
         <Row
           label={t.settings.restyle}

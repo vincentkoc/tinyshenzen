@@ -90,6 +90,11 @@ export async function loadLife(build: string, signal?: AbortSignal): Promise<Lif
   };
 }
 
+/** True when the world has something for the "Life on the map" setting to show. */
+export function hasMapLife(life: LifeFile): boolean {
+  return life.ferries.length > 0 || (life.flights?.length ?? 0) > 0;
+}
+
 /** A data file that may not exist: null for a 404, the parsed JSON otherwise. */
 async function getOptionalJson(url: string, signal?: AbortSignal): Promise<unknown> {
   const res = await fetch(url, { signal });

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { textsFor } from "@/lib/sight-sign";
 import {
   dataUrl,
+  hasMapLife,
   loadHoods,
   loadLife,
   loadManifest,
@@ -77,6 +78,8 @@ export function MapApp() {
   const [placesFailed, setPlacesFailed] = useState(false);
   // whether this world has outlines to draw: known once hoods.json is in, and some have none
   const [hasHoods, setHasHoods] = useState(false);
+  // whether this world has boats or flights: known once life.json is in, and some have none
+  const [hasLife, setHasLife] = useState(false);
   // the buildings that light up, the one lit now, and what Wikipedia says in the loaded language
   const [sights, setSights] = useState<Sight[]>([]);
   const [lit, setLit] = useState<{ id: string; pinned: boolean } | null>(null);
@@ -160,7 +163,9 @@ export function MapApp() {
           .catch(() => {});
         loadLife(manifest.indexes, abort.signal)
           .then((life) => {
-            if (!abort.signal.aborted) createLife(live, life);
+            if (abort.signal.aborted) return;
+            createLife(live, life);
+            setHasLife(hasMapLife(life));
           })
           .catch(() => {});
         // the outlines of the buildings that light up: once the map is drawn, never before it
@@ -201,6 +206,7 @@ export function MapApp() {
     setPlaces(null);
     setPlacesFailed(false);
     setHasHoods(false);
+    setHasLife(false);
     setSights([]);
     setLit(null);
     setAttempt((n) => n + 1);
@@ -501,6 +507,7 @@ export function MapApp() {
                 prefs={prefs}
                 onChange={setPrefs}
                 hoodLines={hasHoods}
+                hasLife={hasLife}
                 hasRestyle={Boolean(session.manifest.restyle)}
               />
             }

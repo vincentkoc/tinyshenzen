@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { dataUrl, loadSights, loadSightTexts, parseFlights, resolveDataBase } from "../data";
+import {
+  dataUrl,
+  hasMapLife,
+  loadSights,
+  loadSightTexts,
+  parseFlights,
+  resolveDataBase,
+} from "../data";
 import { parseManifest } from "../manifest";
 
 describe("loading the sights", () => {
@@ -145,5 +152,26 @@ describe("parseManifest", () => {
       dir: "tiles-restyled",
     });
     expect(parseManifest({ ...valid, restyle: { dir: 4 } }).restyle).toBeUndefined();
+  });
+});
+
+describe("hasMapLife", () => {
+  it("is false when the file has no ferries and no flights", () => {
+    expect(hasMapLife({ ferries: [], flights: [] })).toBe(false);
+    expect(hasMapLife({ ferries: [] })).toBe(false);
+  });
+
+  it("is true when there is at least one ferry or one flight", () => {
+    expect(
+      hasMapLife({ ferries: [{ name: "Shekou ferry", path: [113.913, 22.478] }], flights: [] }),
+    ).toBe(true);
+    expect(
+      hasMapLife({
+        ferries: [],
+        flights: [
+          { kind: "helicopter", path: [114.068, 22.545, 240, 114.058, 22.538, 260], loop: true },
+        ],
+      }),
+    ).toBe(true);
   });
 });
