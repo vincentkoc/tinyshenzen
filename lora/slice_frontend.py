@@ -47,7 +47,12 @@ ellipses, water blob reshapes, milky river veils) from a JSON file in
 global z0 pixels. `--polish-seams` then feathers a tone jump across a
 z0 tile edge, and across a restyle-window hem when those windows are
 still on disk, but only where both sides are the same kind of surface,
-so a building cut or a river bank is not smeared. Higher zoom levels
+so a building cut or a river bank is not smeared. `--polish-tone`
+supersedes it: from the pre-seam tiles it fits one original->restyle
+colour transform for the whole city, cancels consistent tone steps on
+tile and window edges, adds a robust low-pass correction so every window
+lands on that one house tone, and refills washed-out patches from the
+original (see tone.py). Higher zoom levels
 are rebuilt with viewer-fog padding so missing children do not become
 dark squares. Generated images are not committed.
 """
@@ -4010,6 +4015,301 @@ def polish_seams(
 
 
 
+# --- one house tone (see tone.py) -----------------------------------------
+
+TONE_CONTEXT = 3  # tiles of context around a --tone-region
+
+
+def tone_candidate_lines(grid: dict, districts: list[dict] | None) -> tuple[np.ndarray, np.ndarray]:
+    """Grid-pixel x and y of every line a hard tone step can sit on.
+
+    z0 tile edges, plus each district's canvas edges and restyle-window edges.
+    """
+    import tone as TN
+
+    cols, rows = grid["cols"], grid["rows"]
+    W, H = cols * TILE, rows * TILE
+    xs = set(range(0, W + 1, TILE))
+    ys = set(range(0, H + 1, TILE))
+    ox, oy = grid["ox"], grid["oy"]
+    for d in districts or []:
+        dox, doy = d["origin"][0] - ox, d["origin"][1] - oy
+        xs.update((dox, dox + int(d["width"])))
+        ys.update((doy, doy + int(d["height"])))
+        for t in d.get("windows") or []:
+            xs.update((dox + t.x, dox + t.x + t.w))
+            ys.update((doy + t.y, doy + t.y + t.h))
+    xl = [x for x in xs if 0 <= x <= W]
+    yl = [y for y in ys if 0 <= y <= H]
+    # Tile edges must survive the merge (every rectangle sits inside one tile).
+    def merged(vals: list[int], step: int, end: int) -> np.ndarray:
+        keep = sorted(set(range(0, end + 1, step)))
+        out = list(keep)
+        for v in sorted(vals):
+            if all(abs(v - k) >= TN.TONE_MERGE for k in out):
+                out.append(v)
+                out.sort()
+        return np.array(sorted(out), np.int64)
+
+    return merged(xl, TILE, W), merged(yl, TILE, H)
+
+
+_TONE: dict = {}
+
+
+def _tone_load(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB")).copy()
+
+
+def _tone_cells(key: tuple[int, int]):
+    import tone as TN
+
+    tx, ty = key
+    rest = _tone_load(_TONE["src0"] / f"{tx}_{ty}.webp")
+    orig = _tone_load(_TONE["orig0"] / f"{tx}_{ty}.webp") if _TONE["orig0"] else None
+    r = TN.cell_stats(rest) if rest is not None else None
+    o = TN.cell_stats(orig) if orig is not None else None
+    return tx, ty, r, o
+
+
+def _tone_tile_fields(tx: int, ty: int):
+    import tone as TN
+
+    gx, gy = (tx - _TONE["bx"]) * TILE, (ty - _TONE["by"]) * TILE
+    alpha = TN.sample_cells(_TONE["alpha"], gx, gy, TILE)
+    wash = TN.sample_cells(_TONE["wash"], gx, gy, TILE)
+    return alpha, wash
+
+
+def _tone_measure(key: tuple[int, int]):
+    import tone as TN
+
+    tx, ty = key
+    rest = _tone_load(_TONE["src0"] / f"{tx}_{ty}.webp")
+    orig = _tone_load(_TONE["orig0"] / f"{tx}_{ty}.webp") if _TONE["orig0"] else None
+    if rest is None or orig is None:
+        return tx, ty, None
+    alpha, wash = _tone_tile_fields(tx, ty)
+    lab = TN.rgb_to_lab(rest)
+    res = TN.apply_house_style(_TONE["style"], TN.rgb_to_lab(orig)) - lab
+    fog = np.abs(rest.astype(np.int16) - np.array(VIEW_FOG, np.int16)).max(axis=2) <= 6
+    valid = (alpha < 0.05) & (wash < 0.2) & ~fog
+    return tx, ty, TN.tile_measure(res, lab, valid, tx * TILE, ty * TILE, _TONE["xl"], _TONE["yl"])
+
+
+def _tone_apply(key: tuple[int, int]):
+    import tone as TN
+
+    tx, ty = key
+    rest = _tone_load(_TONE["src0"] / f"{tx}_{ty}.webp")
+    if rest is None:
+        return tx, ty, False
+    orig = _tone_load(_TONE["orig0"] / f"{tx}_{ty}.webp") if _TONE["orig0"] else None
+    alpha, wash = _tone_tile_fields(tx, ty)
+    gx, gy = (tx - _TONE["bx"]) * TILE, (ty - _TONE["by"]) * TILE
+    cc = TN.TONE_CELL * 2
+    corr = TN.sample_cells(_TONE["corr"], gx, gy, TILE, cell=cc)
+    stren = TN.sample_cells(_TONE["stren"], gx, gy, TILE, cell=cc)
+    step = TN.step_field(_TONE["segments"], tx * TILE, ty * TILE, TILE, TILE)
+    total = step * (1.0 - alpha)[..., None] + corr * stren[..., None]
+    out = TN.tone_tile(rest, orig, _TONE["style"], total, np.ones_like(stren), wash if orig is not None else np.zeros_like(wash))
+    out_dir: Path = _TONE["out_dir"]
+    path = out_dir / f"{tx}_{ty}.webp"
+    cur = _tone_load(path)
+    if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+        return tx, ty, False
+    _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=_TONE["lossless"])
+    return tx, ty, True
+
+
+def tone_stamp(xl: np.ndarray, yl: np.ndarray) -> str:
+    import tone as TN
+
+    return (
+        f"{TN.TONE_VERSION} cell={TN.TONE_CELL} sigma={TN.TONE_SIGMA} robust={TN.TONE_ROBUST} "
+        f"band={TN.TONE_BAND} consist={TN.TONE_STEP_CONSIST} min={TN.TONE_STEP_MIN} gate={TN.TONE_STEP_GATE} "
+        f"reach={TN.TONE_STEP_REACH} ramp={TN.TONE_STEP_RAMP} "
+        f"wash={TN.TONE_WASH_RATIO}/{TN.TONE_WASH_DETAIL}/{TN.TONE_WASH_L} lines={len(xl)}x{len(yl)}\n"
+    )
+
+
+def polish_tone(
+    dest: Path,
+    grid: dict,
+    *,
+    proc_dest: Path | None,
+    districts: list[dict] | None = None,
+    region: tuple[int, int, int, int] | None = None,
+    out_dir: Path | None = None,
+    lossless_z0: bool = True,
+    workers: int = 8,
+) -> set[tuple[int, int]]:
+    """Give the whole restyle one house tone (free, idempotent from `.tone-src/`).
+
+    Reads the tiles from before `--polish-seams` (`.seams-src/`, else the
+    current z0) once into `.tone-src/`, so re-runs and parameter changes
+    always start from the same source. `region` (tx0, ty0, tx1, ty1, end
+    exclusive) limits the written tiles, and `out_dir` writes them
+    elsewhere, for previews.
+    """
+    import multiprocessing as mp
+
+    import tone as TN
+
+    cols, rows = grid["cols"], grid["rows"]
+    if proc_dest is None or not (proc_dest / "0").is_dir():
+        raise SystemExit("--polish-tone needs the procedural tiles (the original the restyle was made from)")
+    src = dest / ".tone-src"
+    src0 = src / "0"
+    if not src0.is_dir():
+        seed = dest / ".seams-src" / "0"
+        seed = seed if seed.is_dir() else dest / "0"
+        print(f"  tone source: snapshot of {seed}", flush=True)
+        tmp = src / "0.tmp"
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        shutil.copytree(seed, tmp)
+        tmp.replace(src0)
+    present = present_from_disk(src, cols, rows)
+    if not present:
+        return present
+    xl, yl = tone_candidate_lines(grid, districts)
+    stamp = tone_stamp(xl, yl)
+    stamp_path = dest / ".tone-stamp"
+    if region is None and out_dir is None and stamp_path.exists() and stamp_path.read_text() == stamp:
+        print("  tone already applied", flush=True)
+        return present_from_disk(dest, cols, rows)
+
+    t0 = time.time()
+    bx = min(x for x, _ in present)
+    by = min(y for _, y in present)
+    bw = max(x for x, _ in present) - bx + 1
+    bh = max(y for _, y in present) - by + 1
+    C = TILE // TN.TONE_CELL
+    R = np.zeros((bh * C, bw * C, 3), np.float32)
+    O = np.zeros_like(R)
+    ER = np.zeros((bh * C, bw * C), np.float32)
+    EO = np.zeros_like(ER)
+    okR = np.zeros(ER.shape, bool)
+    okO = np.zeros(ER.shape, bool)
+    _TONE.clear()
+    _TONE.update(src0=src0, orig0=proc_dest / "0", bx=bx, by=by, xl=xl, yl=yl, lossless=lossless_z0)
+    ctx = mp.get_context("fork")
+    with ctx.Pool(workers) as pool:
+        for tx, ty, r, o in pool.imap_unordered(_tone_cells, sorted(present), chunksize=8):
+            s = np.s_[(ty - by) * C : (ty - by + 1) * C, (tx - bx) * C : (tx - bx + 1) * C]
+            if r is not None:
+                R[s], ER[s], okR[s] = r[0], r[1], True
+            if o is not None:
+                O[s], EO[s], okO[s] = o[0], o[1], True
+    print(f"  tone cells {R.shape[1]}x{R.shape[0]} in {time.time() - t0:.0f}s", flush=True)
+
+    alpha = np.zeros(ER.shape, np.float32)
+    dist_path = dest / ".vignette-dist.npz"
+    if dist_path.exists():
+        field = np.load(dist_path)["field"]
+        rep = VIGNETTE_SCALE // TN.TONE_CELL
+        f = np.repeat(np.repeat(field, rep, 0), rep, 1)[by * C : (by + bh) * C, bx * C : (bx + bw) * C]
+        alpha[: f.shape[0], : f.shape[1]] = TN.smoothstep(f, -float(VIGNETTE_INSET), float(VIGNETTE_FADE))
+    fog_lab = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
+    pad_lab = TN.rgb_to_lab(np.array((0x1A, 0x1E, 0x1C), np.uint8))
+    fogR = np.linalg.norm(R - fog_lab, axis=-1) < 3.0
+    padO = np.linalg.norm(O - pad_lab, axis=-1) < 6.0
+    valid = okR & okO & (alpha < 0.02) & ~fogR & ~padO
+    style = TN.fit_house_style(O[valid], R[valid])
+    TO = np.empty_like(O)
+    for y in range(0, O.shape[0], 256):
+        TO[y : y + 256] = TN.apply_house_style(style, O[y : y + 256])
+    wash = TN.wash_weight(R, ER, EO, okR & okO & (alpha < 0.5)) * (1.0 - alpha)
+    del ER, EO
+    weights = valid * (1.0 - np.clip(wash * 4.0, 0.0, 1.0))
+    _TONE.update(style=style, alpha=alpha, wash=wash)
+    print(f"  tone house style fitted on {int(valid.sum())} cells, wash cells {int((wash > 0.5).sum())}", flush=True)
+
+    if region is not None:
+        rx0, ry0, rx1, ry1 = region
+        work = {(x, y) for x, y in present if rx0 <= x < rx1 and ry0 <= y < ry1}
+        m = TONE_CONTEXT
+        measure = {(x, y) for x, y in present if rx0 - m <= x < rx1 + m and ry0 - m <= y < ry1 + m}
+        # Crop the cell fields to the context so a preview is quick.
+        cx0, cy0 = max(bx, rx0 - m), max(by, ry0 - m)
+        cx1, cy1 = min(bx + bw, rx1 + m), min(by + bh, ry1 + m)
+        cs = np.s_[(cy0 - by) * C : (cy1 - by) * C, (cx0 - bx) * C : (cx1 - bx) * C]
+        R, O, TO = R[cs], O[cs], TO[cs]
+        alpha, wash, weights = alpha[cs], wash[cs], weights[cs]
+        bx, by = cx0, cy0
+        _TONE.update(bx=bx, by=by, alpha=alpha, wash=wash)
+    else:
+        work = set(present)
+        measure = set(present)
+
+    segs: list[tuple] = []
+    edges: dict = {}
+    with ctx.Pool(workers) as pool:
+        for tx, ty, st in pool.imap_unordered(_tone_measure, sorted(measure), chunksize=4):
+            if st is None:
+                continue
+            for axis, k, j, step in st["steps"]:
+                lines, other = (xl, yl) if axis == "x" else (yl, xl)
+                if np.any(step):
+                    segs.append((0 if axis == "x" else 1, lines[k], other[j], other[j + 1], *step))
+            edges[(tx, ty)] = st["edges"]
+    # Tile-edge lines: pair the neighbour's band with this tile's band.
+    for (tx, ty), e in edges.items():
+        for axis, nb in (("x", (tx - 1, ty)), ("y", (tx, ty - 1))):
+            other = edges.get(nb)
+            if other is None or (axis, "lo") not in e or (axis, "hi") not in other:
+                continue
+            (rm, rok), (lm, lok) = e[(axis, "lo")], other[(axis, "hi")]
+            c, lines, a0 = (tx * TILE, yl, ty * TILE) if axis == "x" else (ty * TILE, xl, tx * TILE)
+            j0, j1 = int(np.searchsorted(lines, a0)), int(np.searchsorted(lines, a0 + TILE))
+            for j in range(j0, j1):
+                sa, sb = lines[j] - a0, lines[j + 1] - a0
+                step = TN.step_stat(lm[sa:sb], rm[sa:sb], lok[sa:sb] & rok[sa:sb])
+                if np.any(step):
+                    segs.append((0 if axis == "x" else 1, c, lines[j], lines[j + 1], *step))
+    segments = np.array(segs, np.float32).reshape(-1, 7)
+    print(f"  tone steps: {len(segments)} seam segments to cancel, {time.time() - t0:.0f}s", flush=True)
+
+    # Cell-level step field, then the smooth correction on what is left.
+    TO -= R
+    del R, O
+    band = 64
+    for y in range(0, TO.shape[0], band):
+        hh = min(band, TO.shape[0] - y)
+        sf = TN.step_field(segments, bx * TILE, by * TILE + y * TN.TONE_CELL, TO.shape[1], hh, TN.TONE_CELL)
+        TO[y : y + hh] -= sf * (1.0 - alpha[y : y + hh])[..., None]
+    # The smooth field is low-pass anyway: solve it on 2x2-pooled cells.
+    h2, w2 = TO.shape[0] // 2, TO.shape[1] // 2
+    w4 = weights[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2)
+    wsum = w4.sum((1, 3))
+    res2 = (TO[: h2 * 2, : w2 * 2] * weights[: h2 * 2, : w2 * 2, None]).reshape(h2, 2, w2, 2, 3).sum((1, 3))
+    res2 /= np.maximum(wsum, 1e-6)[..., None]
+    del TO
+    corr, stren = TN.correction_field(res2, wsum / 4.0, sigma=TN.TONE_SIGMA / 2.0)
+    stren *= 1.0 - alpha[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2).mean((1, 3))
+    _TONE.update(corr=corr, stren=stren, segments=segments)
+    print(f"  tone field done, {time.time() - t0:.0f}s", flush=True)
+
+    target = out_dir if out_dir is not None else dest / "0"
+    target.mkdir(parents=True, exist_ok=True)
+    _TONE["out_dir"] = target
+    changed = 0
+    with ctx.Pool(workers) as pool:
+        for n, (_, _, did) in enumerate(pool.imap_unordered(_tone_apply, sorted(work), chunksize=4), 1):
+            changed += int(did)
+            if n % 500 == 0:
+                print(f"  tone {n}/{len(work)} tiles, {changed} changed, {time.time() - t0:.0f}s", flush=True)
+    if region is None and out_dir is None:
+        stamp_path.write_text(stamp)
+    print(f"  tone done: {changed}/{len(work)} tiles changed, {time.time() - t0:.0f}s", flush=True)
+    _TONE.clear()
+    return present_from_disk(dest, cols, rows)
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
@@ -4131,6 +4431,23 @@ def main() -> None:
         help="after spots: feather a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are on disk; skip building cuts and river banks (free, idempotent)",
     )
     ap.add_argument(
+        "--polish-tone",
+        action="store_true",
+        help="after spots, instead of --polish-seams: one house tone over the whole restyle (global original->restyle colour fit, seam-step solve, robust low-pass correction, washed patches refilled); free, idempotent from .tone-src",
+    )
+    ap.add_argument(
+        "--tone-region",
+        default="",
+        metavar="TX0,TY0,TX1,TY1",
+        help="with --polish-tone: only write z0 tiles in this range (end exclusive), for a preview",
+    )
+    ap.add_argument(
+        "--tone-out",
+        type=Path,
+        default=None,
+        help="with --polish-tone: write toned z0 tiles here instead of in place, and stop (no pyramid)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
         default=None,
@@ -4223,7 +4540,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -4249,7 +4566,7 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
-        elif args.polish_mint or args.polish_spots or args.polish_seams:
+        elif args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone:
             if args.polish_mint:
                 fade = args.fade if args.fade is not None else VIGNETTE_FADE
                 print(f"  mint rims → {dest}", flush=True)
@@ -4260,6 +4577,20 @@ def main() -> None:
             if args.polish_seams:
                 print(f"  seam blend → {dest}", flush=True)
                 z0_present = polish_seams(dest, grid, districts=districts)
+            if args.polish_tone:
+                region = tuple(int(v) for v in args.tone_region.split(",")) if args.tone_region else None
+                if region is not None and len(region) != 4:
+                    raise SystemExit("--tone-region needs TX0,TY0,TX1,TY1")
+                print(f"  house tone → {args.tone_out or dest}", flush=True)
+                z0_present = polish_tone(
+                    dest, grid,
+                    proc_dest=proc_dest,
+                    districts=districts,
+                    region=region,
+                    out_dir=args.tone_out,
+                )
+                if args.tone_out is not None:
+                    return
         elif args.polish_fogline:
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  fog boundary cleanup → {dest}", flush=True)
