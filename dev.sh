@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Tiny Shenzhen in tmux: the viewer and a shell in the pipeline.
-#   ./dev.sh            the Shenzhen viewer (tinysz)
-#   ./dev.sh tinysz-full
+#   ./dev.sh               the Futian test box (tinysz)
+#   ./dev.sh tinysz-core   the restyled Nanshan–Futian–Luohu strip
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION="tinyshenzen"
