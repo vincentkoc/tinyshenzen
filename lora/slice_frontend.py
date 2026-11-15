@@ -40,7 +40,10 @@ with a soft cross-tile mask. All are free and idempotent, and run
 after `--polish-vignette`, passed together. `--polish-fogline` runs
 last, on its own: near the edge it fades fog-dominated pixels (dashed
 traces in fogged ground, gray-washed windows, straight cut-offs) to
-beige with a feathered, noise-wobbled ramp.
+beige with a feathered, noise-wobbled ramp. After it, `--polish-mint`
+turns teal procedural-staging rims toward the forest hue, and
+`--polish-spots FILE` applies a short list of one-off fixes (fog
+ellipses, water blob reshapes) from a JSON file in global z0 pixels.
 Higher zoom levels are rebuilt with viewer-fog padding so missing
 children do not become dark squares. Generated images are not
 committed.

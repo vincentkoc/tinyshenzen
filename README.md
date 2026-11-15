@@ -182,8 +182,10 @@ python3 lora/water_constrain.py \
 # --polish-flats (with them) fades featureless blotches near the edge
 # into the fog and evens forest greens inland too. Last, on its own,
 # --polish-fogline fades dashed traces, gray-washed windows and straight
-# cut-offs at the fog boundary with a feathered ramp. All free and
-# idempotent from snapshots.
+# cut-offs at the fog boundary with a feathered ramp. Then --polish-mint
+# turns teal staging rims forest green, and --polish-spots
+# lora/spots/tinysz-core.json applies a few listed one-off fixes. All
+# free and idempotent from snapshots.
 # python3 lora/slice_frontend.py \
 #   --chunks /tmp/tinysz-core \
 #   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
@@ -192,7 +194,7 @@ python3 lora/water_constrain.py \
 #   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
 #   --polish-vignette
 # (then the same command with --polish-water --polish-forest --polish-flats,
-#  then once more with --polish-fogline)
+#  then --polish-fogline, then --polish-mint --polish-spots lora/spots/tinysz-core.json)
 python3 lora/slice_frontend.py \
   --image /tmp/tinyshenzen-futian-restyled.png \
   --chunks /tmp/tinysz-futian \
