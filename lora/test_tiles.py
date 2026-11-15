@@ -1695,5 +1695,84 @@ class FoglinePolishTest(unittest.TestCase):
                      else np.full((512, 512, 3), SF.VIEW_FOG, int))
             self.assertTrue(np.array_equal(t1, again))
 
+
+
+class MintPolishTest(unittest.TestCase):
+    def test_demint_turns_teal_staging_green_and_keeps_water_glass_forest(self):
+        def one(c):
+            return SF.demint(np.tile(np.array([[c]], np.uint8), (64, 64, 1)))[32, 32].astype(int)
+        ground = one((132, 158, 149))
+        tree = one((40, 150, 100))
+        self.assertLess(ground[2], ground[0])            # blue now below red, like forest
+        self.assertLess(tree[2], tree[0])
+        self.assertAlmostEqual(float(ground.mean()), (132 + 158 + 149) / 3, delta=2.0)
+        for keep in [(36, 88, 74), (90, 170, 190), (90, 113, 72), (233, 230, 223)]:
+            self.assertTrue(np.array_equal(one(keep), np.array(keep)), keep)
+
+    def test_teal_tree_clumps_are_not_water(self):
+        yy, xx = np.mgrid[0:128, 0:128]
+        clumps = np.where(((xx // 6 + yy // 6) % 2 == 0)[:, :, None], (40, 120, 95), (132, 158, 149)).astype(np.uint8)
+        self.assertEqual(float(SF.flat_teal_water(clumps).mean()), 0.0)
+        sea = np.full((128, 128, 3), (36, 88, 74), np.uint8)
+        self.assertEqual(float(SF.flat_teal_water(sea).mean()), 1.0)
+
+    def test_polish_mint_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            (dest / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 3, "rows": 1}
+            teal = np.full((512, 512, 3), (132, 158, 149), np.uint8)
+            for tx in range(3):
+                Image.fromarray(teal, "RGB").save(dest / "0" / f"{tx}_0.webp", "WEBP", lossless=True)
+            field = np.full((32, 96), -2000.0, np.float32)
+            field[:, 32:64] = 100.0
+            SF.polish_mint(dest, grid, field=field)
+            p1 = dest / "0" / "1_0.webp"
+            t1 = np.asarray(Image.open(p1).convert("RGB")).astype(int)
+            self.assertLess(t1[256, 256, 2], t1[256, 256, 0])
+            (dest / ".mint-progress.jsonl").unlink()
+            SF.polish_mint(dest, grid, field=field)
+            self.assertTrue(np.array_equal(t1, np.asarray(Image.open(p1).convert("RGB")).astype(int)))
+
+
+class SpotsPolishTest(unittest.TestCase):
+    def test_fog_and_water_spots(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            (dest / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 1}
+            fog = np.array(SF.VIEW_FOG, np.uint8)
+            t0 = np.tile(fog, (512, 512, 1))
+            t0[100:400, 100:400] = (36, 88, 74)            # a square pond: hard corners
+            t1 = np.tile(fog, (512, 512, 1))
+            t1[200:300, 240:272] = (60, 60, 64)            # a dark stub
+            Image.fromarray(t0, "RGB").save(dest / "0" / "0_0.webp", "WEBP", lossless=True)
+            Image.fromarray(t1, "RGB").save(dest / "0" / "1_0.webp", "WEBP", lossless=True)
+            spots = [
+                {"kind": "water", "box": [0, 0, 512, 512], "sigma": 40},
+                {"kind": "fog", "center": [512 + 256, 250], "radius": [80, 120]},
+            ]
+            SF.polish_spots(dest, grid, spots)
+            self.assertFalse((dest / "0" / "1_0.webp").exists())  # stub gone, tile all beige
+            out = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB")).astype(int)
+            self.assertTrue(SF.is_teal_water(out[245:255, 245:255].astype(np.uint8)).all())
+            corner = out[102, 102]
+            self.assertGreater(float(corner.mean()), 150.0)          # corner rounded off
+            again_stamp = (dest / ".spots-stamp").read_text()
+            SF.polish_spots(dest, grid, spots)                        # no-op on rerun
+            self.assertEqual(again_stamp, (dest / ".spots-stamp").read_text())
+            (dest / ".spots-stamp").unlink()
+            SF.polish_spots(dest, grid, spots)                        # redo from snapshot
+            self.assertTrue(np.array_equal(out, np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB")).astype(int)))
+
+    def test_load_spots_rejects_unknown_kind(self):
+        with tempfile.TemporaryDirectory() as td:
+            p = Path(td) / "s.json"
+            p.write_text('{"spots": [{"kind": "paint"}]}')
+            with self.assertRaises(ValueError):
+                SF.load_spots(p)
+        self.assertGreater(len(SF.load_spots(Path(__file__).parent / "spots" / "tinysz-core.json")), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
