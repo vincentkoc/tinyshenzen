@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rasterize the tinysz scene's ground (and roads) the same way ChunkRenderer
+ * Rasterize a city scene's ground and roads (default tinysz; pass --city) the same way ChunkRenderer
  * does, and write a 1-channel mask: 255 where the kind is water or lake, 0
  * on land. Unpainted cells default to water, matching paintGround, so a later
  * step must AND this with "the procedural pixel actually shows water" — fog
@@ -9,7 +9,7 @@
  * Usage (pipeline already built, scene on disk):
  *
  *   node --max-old-space-size=4096 lora/render_water_mask.mjs \
- *     --out /workspace/tinysz-futian/water_mask.png
+ *     --city tinysz-nanshan --out /workspace/tinysz-nanshan/water_mask.png
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -20,8 +20,13 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, "..");
 const pipeline = path.join(repo, "tinyworlds-pipeline");
 
-process.argv.splice(2, 0, "--city", "tinysz");
-process.env.TINY_CITY = "tinysz";
+// config.ts reads --city / TINY_CITY at import time, so settle the city first
+// (default: the Futian test box).
+const cityAt = process.argv.findIndex((a) => a === "--city" || a.startsWith("--city="));
+const city =
+  cityAt < 0 ? "tinysz" : process.argv[cityAt].includes("=") ? process.argv[cityAt].split("=")[1] : process.argv[cityAt + 1];
+if (cityAt < 0) process.argv.splice(2, 0, "--city", city);
+process.env.TINY_CITY = city;
 
 const { DIRS } = await import(path.join(pipeline, "dist/config.js"));
 const { binRect } = await import(path.join(pipeline, "dist/render/bin.js"));
