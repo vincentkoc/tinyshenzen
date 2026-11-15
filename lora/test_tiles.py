@@ -1781,7 +1781,130 @@ class SpotsPolishTest(unittest.TestCase):
             p.write_text('{"spots": [{"kind": "paint"}]}')
             with self.assertRaises(ValueError):
                 SF.load_spots(p)
+
         self.assertGreater(len(SF.load_spots(Path(__file__).parent / "spots" / "tinysz-core.json")), 0)
+
+    def test_veil_spot_clears_a_wash_and_keeps_texture(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            (dest / "0").mkdir(parents=True)
+            grid = {"ox": 0, "oy": 0, "cols": 1, "rows": 1}
+            water = np.array((28, 86, 64), np.uint8)
+            tile = np.tile(water, (512, 512, 1))
+            # a low-frequency wash plus a fine wave the pull must keep
+            yy, xx = np.mgrid[0:512, 0:512]
+            wave = (8 * np.sin(xx / 7.0)).astype(np.int16)
+            tile = np.clip(tile.astype(np.int16) + wave[:, :, None], 0, 255).astype(np.uint8)
+            washed = tile.copy()
+            fog = np.array(SF.VIEW_FOG, np.int16)
+            # left half is a 60% lerp toward beige
+            washed[:, :260] = np.clip(
+                (tile[:, :260].astype(np.int16) * 0.4 + fog * 0.6).astype(np.int16), 0, 255
+            ).astype(np.uint8)
+            Image.fromarray(washed, "RGB").save(dest / "0" / "0_0.webp", "WEBP", lossless=True)
+            spots = [{"kind": "veil", "box": [0, 0, 512, 512], "sigma": 24}]
+            SF.polish_spots(dest, grid, spots)
+            out = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB")).astype(int)
+            # washed left is pulled back toward the deep water
+            self.assertLess(float(out[256, 80].mean()), 80.0)
+            self.assertGreater(int(out[256, 80, 1] - out[256, 80, 0]), 20)
+            # the wave is still there
+            self.assertGreater(float(out[256, :200, 1].std()), 3.0)
+            # a second run from the snapshot is identical
+            (dest / ".spots-stamp").unlink()
+            SF.polish_spots(dest, grid, spots)
+            again = np.asarray(Image.open(dest / "0" / "0_0.webp").convert("RGB")).astype(int)
+            self.assertTrue(np.array_equal(out, again))
+
+
+class SeamsPolishTest(unittest.TestCase):
+    def _write(self, dest: Path, tx: int, ty: int, arr: np.ndarray) -> None:
+        (dest / "0").mkdir(parents=True, exist_ok=True)
+        Image.fromarray(arr, "RGB").save(dest / "0" / f"{tx}_{ty}.webp", "WEBP", lossless=True)
+
+    def _read(self, dest: Path, tx: int, ty: int) -> np.ndarray:
+        return np.asarray(Image.open(dest / "0" / f"{tx}_{ty}.webp").convert("RGB"))
+
+    def test_tone_step_on_flat_green_is_feathered(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            left = np.full((512, 512, 3), (40, 120, 70), np.uint8)
+            right = np.full((512, 512, 3), (70, 150, 90), np.uint8)
+            self._write(dest, 0, 0, left)
+            self._write(dest, 1, 0, right)
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 1}
+            before = float(np.abs(left[:, -1].astype(int) - right[:, 0].astype(int)).mean())
+            SF.polish_seams(dest, grid)
+            a, b = self._read(dest, 0, 0), self._read(dest, 1, 0)
+            after = float(np.abs(a[:, -1].astype(int) - b[:, 0].astype(int)).mean())
+            self.assertLess(after, before / 4, (before, after))
+            # the far interiors keep their original tones
+            self.assertLess(float(np.abs(a[:, :200].mean(axis=(0, 1)) - (40, 120, 70)).max()), 2.0)
+            self.assertLess(float(np.abs(b[:, 300:].mean(axis=(0, 1)) - (70, 150, 90)).max()), 2.0)
+            # idempotent
+            SF.polish_seams(dest, grid)
+            self.assertTrue(np.array_equal(a, self._read(dest, 0, 0)))
+
+    def test_building_cut_and_river_bank_are_not_smeared(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            # left: a teal tower against beige, cut at the east edge
+            left = np.broadcast_to(np.array(SF.VIEW_FOG, np.uint8), (512, 512, 3)).copy()
+            left[80:420, 200:] = (40, 90, 160)
+            # right: empty beige
+            right = np.broadcast_to(np.array(SF.VIEW_FOG, np.uint8), (512, 512, 3)).copy()
+            self._write(dest, 0, 0, left)
+            self._write(dest, 1, 0, right)
+            # below: a water / paddy bank on a horizontal seam
+            water = np.full((512, 512, 3), (24, 80, 70), np.uint8)
+            paddy = np.full((512, 512, 3), (40, 120, 70), np.uint8)
+            self._write(dest, 0, 1, water)
+            self._write(dest, 0, 2, paddy)
+            grid = {"ox": 0, "oy": 0, "cols": 2, "rows": 3}
+            SF.polish_seams(dest, grid)
+            a, b = self._read(dest, 0, 0), self._read(dest, 1, 0)
+            # the tower still ends at the tile edge; beige does not pick up blue
+            self.assertGreater(int(a[250, -1, 2] - a[250, -1, 0]), 40)
+            self.assertLess(float(np.abs(b[250, :16].astype(int) - np.array(SF.VIEW_FOG)).max()), 4.0)
+            # the river bank is left alone (water vs paddy is a real edge)
+            top, bot = self._read(dest, 0, 1), self._read(dest, 0, 2)
+            self.assertTrue(np.array_equal(top, water))
+            self.assertTrue(np.array_equal(bot, paddy))
+
+    def test_interior_hem_is_blended_when_windows_are_on_disk(self):
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "restyle"
+            windows = Path(td) / "windows"
+            windows.mkdir()
+            # a tone step at x=200, standing in for a restyle-window hem
+            tile = np.full((512, 512, 3), (40, 120, 70), np.uint8)
+            tile[:, 200:] = (70, 150, 90)
+            self._write(dest, 0, 0, tile)
+            Image.fromarray(tile, "RGB").save(windows / "200_0.png")
+            # a district whose overlap starts at grid x=200
+            districts = [{
+                "tiles": windows,
+                "origin": (0, 0),
+                "width": 1024,
+                "height": 1024,
+                "windows": [T.Tile(0, 0, 1024, 1024), T.Tile(200, 0, 1024, 1024)],
+            }]
+            grid = {"ox": 0, "oy": 0, "cols": 1, "rows": 1}
+            before = float(np.abs(tile[:, 199].astype(int) - tile[:, 200].astype(int)).mean())
+            xs, ys = SF.restyle_hem_lines(districts, grid)
+            self.assertIn(200, xs)
+            SF.polish_seams(dest, grid, districts=districts)
+            out = self._read(dest, 0, 0)
+            after = float(np.abs(out[:, 199].astype(int) - out[:, 200].astype(int)).mean())
+            self.assertLess(after, before / 4, (before, after))
+            # without window files the hem is ignored and the step stays
+            dest2 = Path(td) / "restyle2"
+            self._write(dest2, 0, 0, tile)
+            SF.polish_seams(dest2, grid, districts=[{"tiles": Path(td) / "missing", "origin": (0, 0), "windows": [T.Tile(200, 0, 1024, 1024)]}])
+            stuck = self._read(dest2, 0, 0)
+            self.assertGreater(float(np.abs(stuck[:, 199].astype(int) - stuck[:, 200].astype(int)).mean()), before * 0.9)
+
+
 
 
 if __name__ == "__main__":

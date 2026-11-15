@@ -43,10 +43,13 @@ traces in fogged ground, gray-washed windows, straight cut-offs) to
 beige with a feathered, noise-wobbled ramp. After it, `--polish-mint`
 turns teal procedural-staging rims toward the forest hue, and
 `--polish-spots FILE` applies a short list of one-off fixes (fog
-ellipses, water blob reshapes) from a JSON file in global z0 pixels.
-Higher zoom levels are rebuilt with viewer-fog padding so missing
-children do not become dark squares. Generated images are not
-committed.
+ellipses, water blob reshapes, milky river veils) from a JSON file in
+global z0 pixels. `--polish-seams` then feathers a tone jump across a
+z0 tile edge, and across a restyle-window hem when those windows are
+still on disk, but only where both sides are the same kind of surface,
+so a building cut or a river bank is not smeared. Higher zoom levels
+are rebuilt with viewer-fog padding so missing children do not become
+dark squares. Generated images are not committed.
 """
 
 from __future__ import annotations
@@ -3506,7 +3509,10 @@ def polish_mint(
 #   {"kind": "water", "box": [x0, y0, x1, y1], "sigma": px}
 #       redraw an isolated water blob inside the box with a smoothed outline
 #       (its water/fog blend, blurred and re-thresholded), so straight
-#       tile-edge cuts and notches round off.
+#       tile-edge cuts and notches round off;
+#   {"kind": "veil", "box": [x0, y0, x1, y1], "sigma": px}
+#       pull a milky wash on water back toward the deep-water tone in the
+#       box, keeping wave texture; land and buildings are left alone.
 # Sources are a one-time .spots-src snapshot, so the pass is idempotent.
 # ---------------------------------------------------------------------------
 
@@ -3518,7 +3524,7 @@ def spot_bbox(spot: dict) -> tuple[int, int, int, int]:
     if spot["kind"] == "fog":
         (cx, cy), (rx, ry) = spot["center"], spot["radius"]
         return int(cx - rx), int(cy - ry), int(math.ceil(cx + rx)), int(math.ceil(cy + ry))
-    if spot["kind"] == "water":
+    if spot["kind"] in ("water", "veil"):
         x0, y0, x1, y1 = spot["box"]
         return int(x0), int(y0), int(x1), int(y1)
     raise ValueError(f"unknown spot kind {spot['kind']!r}")
@@ -3552,6 +3558,50 @@ def water_spot(canvas: np.ndarray, spot: dict) -> np.ndarray:
     shape = smoothstep(smooth, 0.2, 0.7)
     shape = gaussian_blur_float(shape.astype(np.float32), sigma / 2.0)
     out = fog * (1.0 - shape[:, :, None]) + water * shape[:, :, None]
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
+
+def veil_spot(canvas: np.ndarray, spot: dict) -> np.ndarray:
+    """Pull a milky wash on water in `canvas` toward the deep-water tone."""
+    rgb = canvas.astype(np.float32)
+    h, w, _ = rgb.shape
+    deep = is_teal_water(canvas)
+    washed = is_washed_water(canvas)
+    if deep.any():
+        water = np.median(rgb[deep], axis=0)
+    elif washed.any():
+        # no deep sample: use the darker washed pixels as the target
+        lum = rgb.mean(axis=2)
+        pick = washed & (lum <= np.median(lum[washed]))
+        water = np.median(rgb[pick if pick.any() else washed], axis=0)
+    else:
+        return canvas.copy()
+    fog = np.array(VIEW_FOG, np.float32)
+    axis = fog - water
+    denom = float(axis @ axis) + 1e-6
+    proj = np.clip(((rgb - water) @ axis) / denom, 0.0, 1.0)
+    closest = water + proj[:, :, None] * axis
+    dist = np.sqrt(((rgb - closest) ** 2).sum(axis=2))
+    # leftover green keeps this on water, not on beige sand or a glass wall
+    still_waterish = rgb[:, :, 1] > rgb[:, :, 0] + 4.0
+    on_line = (dist < 14.0) & still_waterish & (proj > 0.06) & (proj < 0.95)
+    amount = on_line.astype(np.float32)
+    if not amount.any():
+        return canvas.copy()
+    sigma = float(spot.get("sigma", 40))
+    amount = gaussian_blur_float(amount, max(1.0, sigma / 2.0))
+    # fade the fix out at the crop edge so neighbouring tiles do not step
+    pad = max(8, int(sigma / 2.0))
+    edge = np.ones((h, w), np.float32)
+    edge[:pad, :] *= np.linspace(0.0, 1.0, pad, dtype=np.float32)[:, None]
+    edge[-pad:, :] *= np.linspace(1.0, 0.0, pad, dtype=np.float32)[:, None]
+    edge[:, :pad] *= np.linspace(0.0, 1.0, pad, dtype=np.float32)[None, :]
+    edge[:, -pad:] *= np.linspace(1.0, 0.0, pad, dtype=np.float32)[None, :]
+    amount *= edge
+    # replace the low-frequency wash with the deep-water tone; keep the waves
+    low = np.stack([gaussian_blur_float(rgb[:, :, c], 8.0) for c in range(3)], axis=2)
+    out = rgb + amount[:, :, None] * (water - low)
     return np.clip(np.round(out), 0, 255).astype(np.uint8)
 
 
@@ -3612,6 +3662,8 @@ def polish_spots(dest: Path, grid: dict, spots: list[dict], *, lossless_z0: bool
         crop = canvas[cy0:cy1, cx0:cx1]
         if spot["kind"] == "fog":
             crop = fog_spot(crop, (ox + cx0, oy + cy0), spot)
+        elif spot["kind"] == "veil":
+            crop = veil_spot(crop, spot)
         else:
             crop = water_spot(crop, spot)
         canvas[cy0:cy1, cx0:cx1] = crop
@@ -3641,6 +3693,321 @@ def polish_spots(dest: Path, grid: dict, spots: list[dict], *, lossless_z0: bool
     stamp_path.write_text(stamp)
     print(f"  spots done: {len(spots)} spots, {len(tiles)} tiles, changed={changed} removed={removed}", flush=True)
     return present
+
+
+# ---------------------------------------------------------------------------
+# --polish-seams: feather a tone jump across a z0 tile edge, or across a
+# restyle-window hem when those windows are still on disk. Only the
+# low-frequency colour offset is moved, and only where both sides are the
+# same kind of surface (water, paddies, sand) so a building cut, a river
+# bank, or a path is not smeared. Idempotent: a stamp mismatch re-snapshots
+# the current dest (so a preceding spots pass is picked up) and starts again.
+# ---------------------------------------------------------------------------
+
+SEAMS_VERSION = "seams-1"
+SEAMS_FEATHER = 16
+SEAMS_JUMP = 8.0
+SEAMS_SMOOTH = 12.0
+SEAMS_CHROMA = 0.07
+SEAMS_MASK_SMOOTH = 4.0
+SEAMS_WINDOW = 1024
+SEAMS_OVERLAP = 256
+
+
+def gaussian_1d(field: np.ndarray, radius: float) -> np.ndarray:
+    """Blur along axis 0. `field` is (N,) or (N, C)."""
+    if radius <= 0:
+        return field.astype(np.float32, copy=False)
+    sigma = float(radius)
+    r = max(1, int(math.ceil(3.0 * sigma)))
+    x = np.arange(-r, r + 1, dtype=np.float64)
+    kernel = np.exp(-(x * x) / (2.0 * sigma * sigma))
+    kernel /= kernel.sum()
+    kernel = kernel.astype(np.float32)
+    if field.ndim == 1:
+        src = np.pad(field.astype(np.float32), (r, r), mode="edge")
+        windows = np.lib.stride_tricks.sliding_window_view(src, kernel.size)
+        return np.tensordot(windows, kernel, axes=([1], [0])).astype(np.float32)
+    src = np.pad(field.astype(np.float32), ((r, r), (0, 0)), mode="edge")
+    windows = np.lib.stride_tricks.sliding_window_view(src, kernel.size, axis=0)
+    return np.tensordot(windows, kernel, axes=([2], [0])).astype(np.float32)
+
+
+def is_washed_water(arr: np.ndarray, min_lum: float = 90.0) -> np.ndarray:
+    """Teal chroma at a higher luminance than `is_teal_water` (a fog wash on water)."""
+    rgb = arr[:, :, :3].astype(np.int16)
+    r, g, b = rgb[:, :, 0], rgb[:, :, 1], rgb[:, :, 2]
+    lum = rgb.mean(axis=2)
+    return (g - r >= 16) & (b - r >= 8) & (g - b >= -12) & (g - b <= 40) & (lum >= min_lum)
+
+
+def _waterish(mean_rgb: np.ndarray) -> np.ndarray:
+    """Per-row (N, 3) means that look like water, including a pale wash."""
+    r, g, b = mean_rgb[:, 0], mean_rgb[:, 1], mean_rgb[:, 2]
+    lum = mean_rgb.mean(axis=1)
+    return (g - r >= 16) & (b - r >= 8) & (g - b >= -12) & (g - b <= 40) & (lum < 200)
+
+
+def _near_fog(mean_rgb: np.ndarray, tol: float = 10.0) -> np.ndarray:
+    fog = np.array(VIEW_FOG, np.float32)
+    return np.max(np.abs(mean_rgb - fog), axis=1) <= tol
+
+
+def _chroma(mean_rgb: np.ndarray) -> np.ndarray:
+    s = mean_rgb.sum(axis=1, keepdims=True) + 1.0
+    return mean_rgb / s
+
+
+def _feather_weights(width: int) -> np.ndarray:
+    """1 at the seam, 0 at `width`. Smoothstep."""
+    if width <= 0:
+        return np.zeros((0,), np.float32)
+    t = np.linspace(1.0, 0.0, width, endpoint=False, dtype=np.float32)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def blend_seam_pair(
+    left: np.ndarray,
+    right: np.ndarray,
+    *,
+    feather: int = SEAMS_FEATHER,
+    jump: float = SEAMS_JUMP,
+    smooth: float = SEAMS_SMOOTH,
+    chroma: float = SEAMS_CHROMA,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Meet two arrays at their shared vertical edge by a low-frequency offset.
+
+    `left` is to the west of the seam (its last columns), `right` to the east.
+    Horizontal seams are applied by rotating the pair before the call.
+    Returns the new arrays and how many seam rows were blended.
+    """
+    h, lw, _ = left.shape
+    _, rw, _ = right.shape
+    width = min(int(feather), lw, rw)
+    if width < 2 or h < 2:
+        return left, right, 0
+    lmean = left[:, -2:].astype(np.float32).mean(axis=1)
+    rmean = right[:, :2].astype(np.float32).mean(axis=1)
+    off = gaussian_1d(rmean - lmean, smooth)
+    mag = np.abs(off).mean(axis=1)
+    chroma_d = np.abs(_chroma(lmean) - _chroma(rmean)).max(axis=1)
+    same = (chroma_d < chroma) | (_waterish(lmean) & _waterish(rmean))
+    ok = (mag >= jump) & same & ~_near_fog(lmean) & ~_near_fog(rmean)
+    mask = gaussian_1d(ok.astype(np.float32), SEAMS_MASK_SMOOTH)
+    mask = np.clip(mask, 0.0, 1.0)
+    if float(mask.max()) < 1e-4:
+        return left, right, 0
+    weights = _feather_weights(width)
+    lout = left.astype(np.float32)
+    rout = right.astype(np.float32)
+    # half the offset each way, fading out from the seam
+    for i, w in enumerate(weights):
+        gain = (0.5 * w) * mask[:, None]
+        lout[:, lw - 1 - i, :] += gain * off
+        rout[:, i, :] -= gain * off
+    n = int((mask >= 0.25).sum())
+    return (
+        np.clip(np.round(lout), 0, 255).astype(np.uint8),
+        np.clip(np.round(rout), 0, 255).astype(np.uint8),
+        n,
+    )
+
+
+def restyle_hem_lines(
+    districts: list[dict] | None,
+    grid: dict,
+    *,
+    window: int = SEAMS_WINDOW,
+    overlap: int = SEAMS_OVERLAP,
+) -> tuple[list[int], list[int]]:
+    """Grid-pixel x and y of restyle-window overlap starts, when those windows exist on disk."""
+    xs: set[int] = set()
+    ys: set[int] = set()
+    if not districts:
+        return [], []
+    ox, oy = grid["ox"], grid["oy"]
+    for d in districts:
+        tiles_dir = d.get("tiles")
+        if not tiles_dir or not Path(tiles_dir).is_dir():
+            continue
+        if not any(Path(tiles_dir).glob("*.png")):
+            continue
+        dox, doy = d["origin"]
+        for t in d["windows"]:
+            if t.x > 0:
+                xs.add(int(dox + t.x - ox))
+            if t.y > 0:
+                ys.add(int(doy + t.y - oy))
+    return sorted(xs), sorted(ys)
+
+
+def seams_stamp(
+    feather: int,
+    jump: float,
+    smooth: float,
+    chroma: float,
+    hem_x: list[int],
+    hem_y: list[int],
+    spots_stamp_text: str = "",
+) -> str:
+    return (
+        f"{SEAMS_VERSION} feather={feather} jump={jump} smooth={smooth} "
+        f"chroma={chroma} hem_x={len(hem_x)} hem_y={len(hem_y)} spots={spots_stamp_text!r}\n"
+    )
+
+
+def _seams_load(path: Path) -> np.ndarray:
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB")).copy()
+
+
+def polish_seams(
+    dest: Path,
+    grid: dict,
+    districts: list[dict] | None = None,
+    *,
+    lossless_z0: bool = True,
+    feather: int = SEAMS_FEATHER,
+    jump: float = SEAMS_JUMP,
+    smooth: float = SEAMS_SMOOTH,
+    chroma: float = SEAMS_CHROMA,
+) -> set[tuple[int, int]]:
+    """Feather jumping z0 tile edges, and restyle-window hems when they are on disk."""
+    cols, rows = grid["cols"], grid["rows"]
+    dest0 = dest / "0"
+    snap0 = dest / ".seams-src" / "0"
+    stamp_path = dest / ".seams-stamp"
+    spots_text = (dest / ".spots-stamp").read_text() if (dest / ".spots-stamp").exists() else ""
+    hem_x, hem_y = restyle_hem_lines(districts, grid)
+    stamp = seams_stamp(feather, jump, smooth, chroma, hem_x, hem_y, spots_text)
+    present = present_from_disk(dest, cols, rows)
+    if stamp_path.exists() and stamp_path.read_text() == stamp:
+        print("  seams already applied", flush=True)
+        return present
+    # A stamp mismatch (or the first run) snapshots the current dest, so a
+    # spots pass that just rewrote these tiles is the source, not an old blend.
+    if snap0.exists():
+        shutil.rmtree(snap0)
+    snap0.mkdir(parents=True, exist_ok=True)
+    for tx, ty in present:
+        src = dest0 / f"{tx}_{ty}.webp"
+        if src.exists():
+            shutil.copy2(src, snap0 / f"{tx}_{ty}.webp")
+
+    def load(tx: int, ty: int) -> np.ndarray | None:
+        key = (tx, ty)
+        if key in work:
+            return work[key]
+        path = snap0 / f"{tx}_{ty}.webp"
+        if not path.exists():
+            return None
+        work[key] = _seams_load(path)
+        return work[key]
+
+    work: dict[tuple[int, int], np.ndarray] = {}
+    edge_rows = 0
+    # Vertical tile edges, then horizontal (the second pass sees the first).
+    for ty in range(rows):
+        for tx in range(cols - 1):
+            if (tx, ty) not in present or (tx + 1, ty) not in present:
+                continue
+            left, right = load(tx, ty), load(tx + 1, ty)
+            if left is None or right is None:
+                continue
+            a, b, n = blend_seam_pair(left, right, feather=feather, jump=jump, smooth=smooth, chroma=chroma)
+            if n:
+                work[(tx, ty)], work[(tx + 1, ty)] = a, b
+                edge_rows += n
+    for ty in range(rows - 1):
+        for tx in range(cols):
+            if (tx, ty) not in present or (tx, ty + 1) not in present:
+                continue
+            top, bot = load(tx, ty), load(tx, ty + 1)
+            if top is None or bot is None:
+                continue
+            # Rotate so the shared edge is vertical, reuse the same blender.
+            a, b, n = blend_seam_pair(
+                np.rot90(top, 1),
+                np.rot90(bot, 1),
+                feather=feather,
+                jump=jump,
+                smooth=smooth,
+                chroma=chroma,
+            )
+            if n:
+                work[(tx, ty)] = np.ascontiguousarray(np.rot90(a, -1))
+                work[(tx, ty + 1)] = np.ascontiguousarray(np.rot90(b, -1))
+                edge_rows += n
+
+    # Interior restyle-window hems: the same blender, split inside one tile.
+    hem_rows = 0
+    margin = max(feather, 2)
+    for hx in hem_x:
+        local = hx % TILE
+        tx = hx // TILE
+        if tx < 0 or tx >= cols or local < margin or local > TILE - margin:
+            continue
+        for ty in range(rows):
+            if (tx, ty) not in present:
+                continue
+            tile = load(tx, ty)
+            if tile is None:
+                continue
+            a, b, n = blend_seam_pair(
+                tile[:, :local].copy(),
+                tile[:, local:].copy(),
+                feather=feather,
+                jump=jump,
+                smooth=smooth,
+                chroma=chroma,
+            )
+            if n:
+                out = tile.copy()
+                out[:, :local], out[:, local:] = a, b
+                work[(tx, ty)] = out
+                hem_rows += n
+    for hy in hem_y:
+        local = hy % TILE
+        ty = hy // TILE
+        if ty < 0 or ty >= rows or local < margin or local > TILE - margin:
+            continue
+        for tx in range(cols):
+            if (tx, ty) not in present:
+                continue
+            tile = load(tx, ty)
+            if tile is None:
+                continue
+            a, b, n = blend_seam_pair(
+                np.rot90(tile[:local, :], 1),
+                np.rot90(tile[local:, :], 1),
+                feather=feather,
+                jump=jump,
+                smooth=smooth,
+                chroma=chroma,
+            )
+            if n:
+                out = tile.copy()
+                out[:local, :] = np.ascontiguousarray(np.rot90(a, -1))
+                out[local:, :] = np.ascontiguousarray(np.rot90(b, -1))
+                work[(tx, ty)] = out
+                hem_rows += n
+
+    changed = 0
+    for (tx, ty), out in sorted(work.items()):
+        path = dest0 / f"{tx}_{ty}.webp"
+        cur = _seams_load(path) if path.exists() else None
+        if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+            continue
+        _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=lossless_z0)
+        changed += 1
+    stamp_path.write_text(stamp)
+    print(
+        f"  seams done: changed={changed} edge_rows={edge_rows} hem_rows={hem_rows} "
+        f"hems={len(hem_x)}x/{len(hem_y)}y",
+        flush=True,
+    )
+    return present
+
 
 
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
@@ -3756,7 +4123,12 @@ def main() -> None:
         type=Path,
         default=None,
         metavar="JSON",
-        help="apply listed one-off fixes (fog ellipses, water blob reshapes) from a spots file such as lora/spots/tinysz-core.json (free, idempotent)",
+        help="apply listed one-off fixes (fog ellipses, water blob reshapes, milky river veils) from a spots file such as lora/spots/tinysz-core.json (free, idempotent)",
+    )
+    ap.add_argument(
+        "--polish-seams",
+        action="store_true",
+        help="after spots: feather a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are on disk; skip building cuts and river banks (free, idempotent)",
     )
     ap.add_argument(
         "--fade",
@@ -3851,7 +4223,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -3877,7 +4249,7 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
-        elif args.polish_mint or args.polish_spots:
+        elif args.polish_mint or args.polish_spots or args.polish_seams:
             if args.polish_mint:
                 fade = args.fade if args.fade is not None else VIGNETTE_FADE
                 print(f"  mint rims → {dest}", flush=True)
@@ -3885,6 +4257,9 @@ def main() -> None:
             if args.polish_spots:
                 print(f"  spots from {args.polish_spots} → {dest}", flush=True)
                 z0_present = polish_spots(dest, grid, load_spots(args.polish_spots))
+            if args.polish_seams:
+                print(f"  seam blend → {dest}", flush=True)
+                z0_present = polish_seams(dest, grid, districts=districts)
         elif args.polish_fogline:
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  fog boundary cleanup → {dest}", flush=True)
