@@ -10,6 +10,7 @@ import { cityFog, GEO } from "../scene/build.js";
 import { FOG, fogAt } from "../scene/fog.js";
 import { hashString } from "../scene/hash.js";
 import { buildSyntheticIndex } from "../scene/synthetic.js";
+import { englishAlias } from "./names.js";
 import { stampIndexes } from "./stamp.js";
 import { writeSights } from "./write-sights.js";
 import type { Source } from "./sights.js";
@@ -26,6 +27,8 @@ export type PlaceType =
 
 export interface Place {
   n: string;
+  /** the name in English, beside a Chinese `n` (see englishAlias) */
+  e?: string;
   t: PlaceType;
   lon: number;
   lat: number;
@@ -267,6 +270,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     if (!place.n) return;
     const prior = seen.get(key);
     if (prior) {
+      if (place.e && !prior.e) prior.e = place.e;
       // the building data knows which building a hand-picked name means (its point may miss it)
       if (place.seed !== undefined && prior.seed === undefined) prior.seed = place.seed;
       return;
@@ -335,20 +339,29 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   // ---- the names locals use: SoHo, Tribeca; Jardim Paulista, Campos Elíseos
   for (const row of await rows(
     conn,
-    `SELECT names."primary", subtype, ST_X(geometry), ST_Y(geometry) FROM '${raw("division.parquet")}'
+    `SELECT names."primary", subtype, ST_X(geometry), ST_Y(geometry), names.common['en'] FROM '${raw("division.parquet")}'
      WHERE subtype IN ('neighborhood', 'microhood', 'macrohood') AND names."primary" IS NOT NULL`,
   )) {
     const lon = numberOf(row[2]);
     const lat = numberOf(row[3]);
     const context = contextAt(lon, lat);
     if (context !== null && !CITY.search.skip?.test(text(row[0])))
-      add({ n: text(row[0]), t: "hood", lon, lat, b: context, r: text(row[1]) === "macrohood" ? 58 : 54 });
+      add({
+        n: text(row[0]),
+        e: englishAlias(text(row[0]), text(row[4])),
+        t: "hood",
+        lon,
+        lat,
+        b: context,
+        r: text(row[1]) === "macrohood" ? 58 : 54,
+      });
   }
 
   // ---- parks, by size
   for (const row of await rows(
     conn,
-    `SELECT names."primary", ST_X(ST_Centroid(geometry)), ST_Y(ST_Centroid(geometry)), ST_Area(geometry)
+    `SELECT names."primary", ST_X(ST_Centroid(geometry)), ST_Y(ST_Centroid(geometry)), ST_Area(geometry),
+            names.common['en']
      FROM '${raw("land_use.parquet")}'
      WHERE class = 'park' AND names."primary" IS NOT NULL AND ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON')
        AND ST_Area(geometry) > 1.5e-6
@@ -359,7 +372,15 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     if (!onMap(lon, lat)) continue;
     // degrees² → a rank between 30 and 75
     const rank = Math.max(30, Math.min(75, 46 + Math.log10(numberOf(row[3]) / 1e-5) * 12));
-    add({ n: text(row[0]), t: "park", lon, lat, b: contextOf(lon, lat), r: Math.round(rank) });
+    add({
+      n: text(row[0]),
+      e: englishAlias(text(row[0]), text(row[4])),
+      t: "park",
+      lon,
+      lat,
+      b: contextOf(lon, lat),
+      r: Math.round(rank),
+    });
   }
 
   // ---- buildings with a name: the tall ones and the civic ones (how tall, and which others, is the city's)
@@ -378,7 +399,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   for (const row of await rows(
     conn,
     `SELECT names."primary", ST_X(ST_Centroid(geometry)), ST_Y(ST_Centroid(geometry)),
-            coalesce(height, num_floors * ${CITY.heights.storey}, 0), class, id
+            coalesce(height, num_floors * ${CITY.heights.storey}, 0), class, id, names.common['en']
      FROM '${raw("building.parquet")}'
      WHERE names."primary" IS NOT NULL
        AND (height >= ${minHeight} OR (height IS NULL AND num_floors >= ${Math.round(minHeight / 4.6)})
@@ -392,6 +413,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     const cls = text(row[4]);
     add({
       n: text(row[0]),
+      e: englishAlias(text(row[0]), text(row[6])),
       t: cls === "museum" ? "museum" : cls === "train_station" ? "station" : "landmark",
       lon,
       lat,
@@ -408,7 +430,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     .join(", ");
   for (const row of await rows(
     conn,
-    `SELECT names."primary", basic_category, ST_X(geometry), ST_Y(geometry), confidence
+    `SELECT names."primary", basic_category, ST_X(geometry), ST_Y(geometry), confidence, names.common['en']
      FROM '${raw("place.parquet")}'
      WHERE confidence >= 0.92 AND names."primary" IS NOT NULL AND basic_category IN (${categories})
      ORDER BY confidence DESC`,
@@ -420,6 +442,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     const category = text(row[1]);
     add({
       n: text(row[0]),
+      e: englishAlias(text(row[0]), text(row[5])),
       t: PLACE_CATEGORIES[category],
       lon,
       lat,
@@ -434,15 +457,17 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   if (stationSuffix !== null) {
     for (const row of await rows(
       conn,
-      `SELECT names."primary", ST_X(geometry), ST_Y(geometry) FROM '${raw("infrastructure.parquet")}'
+      `SELECT names."primary", ST_X(geometry), ST_Y(geometry), names.common['en'] FROM '${raw("infrastructure.parquet")}'
        WHERE class IN ('subway_station', 'railway_station') AND names."primary" IS NOT NULL AND ST_GeometryType(geometry) = 'POINT'`,
     )) {
       const lon = numberOf(row[1]);
       const lat = numberOf(row[2]);
       const context = contextAt(lon, lat);
+      const en = englishAlias(text(row[0]), text(row[3]));
       if (context !== null)
         add({
           n: withSuffix(text(row[0]), stationSuffix),
+          ...(en ? { e: withSuffix(en, stationSuffix) } : {}),
           t: "station",
           lon,
           lat,
@@ -456,6 +481,8 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   // ---- streets and bridges: one entry per name per district, placed on the street near its middle
   interface Street {
     name: string;
+    /** the first English name any of its pieces carries */
+    en?: string;
     borough: string;
     length: number;
     sumLon: number;
@@ -466,7 +493,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   }
   const streets = new Map<string, Street>();
   const result = await conn.stream(
-    `SELECT names."primary", class, CAST(to_json(road_flags) AS VARCHAR), ST_AsWKB(geometry)
+    `SELECT names."primary", class, CAST(to_json(road_flags) AS VARCHAR), ST_AsWKB(geometry), names.common['en']
      FROM '${raw("segment.parquet")}'
      WHERE subtype = 'road' AND names."primary" IS NOT NULL
        AND class IN ('motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential', 'unclassified', 'pedestrian', 'living_street')`,
@@ -499,6 +526,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
             major: false,
           }),
         );
+      street.en ??= englishAlias(name, text(row[4]));
       street.length += info.length;
       street.sumLon += info.lon * info.length;
       street.sumLat += info.lat * info.length;
@@ -523,6 +551,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     const rank = Math.round(Math.min(48, 14 + Math.log10(street.length / 250) * 14 + (street.major ? 6 : 0)));
     add({
       n: street.name,
+      e: street.en,
       t: street.bridge ? "bridge" : "street",
       lon: best[0],
       lat: best[1],
@@ -559,7 +588,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     path.join(out, "places.json"),
     JSON.stringify({
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      places: places.map(({ src, seed, sight, ...place }) => place),
+      places: places.map(({ src, seed, sight, e, ...place }) => (e ? { ...place, e } : place)),
     }),
   );
   fs.writeFileSync(path.join(out, "hoods.json"), JSON.stringify({ hoods }));
