@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Place } from "../manifest";
-import { createSearchIndex, normalize } from "../search";
+import { createSearchIndex, displayName, normalize } from "../search";
 import { ES_RULES, PT_RULES, roman } from "../search-rules";
 
 const p = (n: string, t: Place["t"], r: number, b?: string): Place => ({
@@ -366,5 +366,34 @@ describe("Chinese names", () => {
   it("still finds the English half of a bilingual name", () => {
     expect(zhNames("Shenzhen Bay")).toEqual(["深圳灣公路大橋 Shenzhen Bay Bridge"]);
     expect(zhNames("library")).toEqual(["福田区图书馆 Futian Library"]);
+  });
+});
+
+describe("English names beside Chinese ones", () => {
+  const withEn = (n: string, e: string, t: Place["t"], r: number): Place => ({ ...p(n, t, r), e });
+  const bi = createSearchIndex([
+    withEn("莲花山公园", "Lianhuashan Park", "park", 86),
+    withEn("高新园 station", "Hi-Tech Park station", "station", 30),
+    withEn("平安金融中心", "Ping An Finance Center", "landmark", 94),
+    p("华强北", "hood", 80, "Futian"),
+  ]);
+  const biNames = (q: string) => bi.search(q).map((h) => h.place.n);
+
+  it("finds a Chinese place by its English name", () => {
+    expect(biNames("Lianhuashan")).toEqual(["莲花山公园"]);
+    expect(biNames("hi-tech park")).toEqual(["高新园 station"]);
+    expect(biNames("ping an finance center")[0]).toBe("平安金融中心");
+    expect(bi.search("Lianhuashan Park")[0].tier).toBe(6);
+  });
+
+  it("still finds it by its Chinese name", () => {
+    expect(biNames("莲花山")).toEqual(["莲花山公园"]);
+  });
+
+  it("labels it in both languages, Chinese first", () => {
+    expect(displayName({ n: "莲花山公园", e: "Lianhuashan Park" })).toBe(
+      "莲花山公园 · Lianhuashan Park",
+    );
+    expect(displayName({ n: "华强北" })).toBe("华强北");
   });
 });

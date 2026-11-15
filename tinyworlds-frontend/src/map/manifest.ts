@@ -59,6 +59,8 @@ export type PlaceType =
 export interface Place {
   /** name */
   n: string;
+  /** the name in English, beside a Chinese `n`: searchable, and shown after it */
+  e?: string;
   t: PlaceType;
   lon: number;
   lat: number;

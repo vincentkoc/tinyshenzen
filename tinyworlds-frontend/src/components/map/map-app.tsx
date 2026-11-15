@@ -35,7 +35,7 @@ import { createLife } from "@/map/life";
 import { MapEngine } from "@/map/engine";
 import { formatHash, parseHash, writeHash } from "@/map/hash";
 import type { Manifest, Place } from "@/map/manifest";
-import { createSearchIndex } from "@/map/search";
+import { createSearchIndex, displayName } from "@/map/search";
 import { WORLD } from "@/worlds";
 import { AboutDialog } from "./about-dialog";
 import { CreditStrip } from "./credit-strip";
@@ -239,8 +239,11 @@ export function MapApp() {
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
   useEffect(() => {
     if (!engine || !session) return;
-    const dir = prefs.restyle && session.manifest.restyle?.dir ? session.manifest.restyle.dir : "tiles";
-    engine.setTileUrl((z, tx, ty) => dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, session.manifest.build));
+    const dir =
+      prefs.restyle && session.manifest.restyle?.dir ? session.manifest.restyle.dir : "tiles";
+    engine.setTileUrl((z, tx, ty) =>
+      dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, session.manifest.build),
+    );
   }, [engine, session, prefs.restyle]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
 
@@ -277,7 +280,7 @@ export function MapApp() {
       // close to native size, land exactly on it: that is where the pixel art is crisp
       if (fitted > 0.55 && fitted < 1.6) fitted = 1;
       const scale = Math.min(Math.max(place.s ?? fitted, limits.min), Math.min(limits.max, 2));
-      engine.setPin({ lon: place.lon, lat: place.lat, name: place.n });
+      engine.setPin({ lon: place.lon, lat: place.lat, name: displayName(place) });
       engine.flyTo({ lon: place.lon, lat: place.lat, scale });
     },
     [engine],

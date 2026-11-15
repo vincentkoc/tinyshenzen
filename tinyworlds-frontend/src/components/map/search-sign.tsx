@@ -207,6 +207,7 @@ export function SearchSign({
               <PlaceBullet type={place.t} />
               <span className="min-w-0 flex-1 truncate text-[14.5px] leading-tight font-medium">
                 {place.n}
+                {place.e && <span className="font-normal text-paper-dim"> · {place.e}</span>}
               </span>
               <span className="max-w-[45%] shrink-0 truncate text-xs text-paper-dim">
                 {place.b && place.b !== place.n ? place.b : placeLabel(place.t, t, copy)}

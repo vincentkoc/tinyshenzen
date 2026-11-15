@@ -54,6 +54,11 @@ export function normalize(text: string, rules: SearchRules = WORLD.search): stri
   );
 }
 
+/** A place's name as a label: the Chinese name, then its English one where the index has it. */
+export function displayName(place: Pick<Place, "n" | "e">): string {
+  return place.e ? `${place.n} · ${place.e}` : place.n;
+}
+
 /** Edit distance (insert, delete, substitute, swap neighbours), abandoned once it passes `max`. */
 function editDistance(a: string, b: string, max: number): number {
   if (Math.abs(a.length - b.length) > max) return max + 1;
@@ -104,6 +109,9 @@ function wordMatch(token: string, word: string): 0 | 1 | 2 | 3 {
 interface Entry {
   place: Place;
   name: string;
+  /** the English name, normalized: found as well as the name, never shown in its place */
+  alias: string;
+  /** the name's words, then the English name's */
   words: string[];
   context: string[];
   /** first letters of the words, with and without the small ones: "moma" and "mma" */
@@ -114,27 +122,32 @@ export function createSearchIndex(places: Place[], rules: SearchRules = WORLD.se
   const initialsSkip = new Set(rules.initialsSkip);
   const entries: Entry[] = places.map((place) => {
     const name = normalize(place.n, rules);
+    const alias = place.e ? normalize(place.e, rules) : "";
     const words = name.split(" ").filter(Boolean);
+    const aliasWords = alias.split(" ").filter(Boolean);
     return {
       place,
       name,
-      words,
+      alias,
+      words: [...words, ...aliasWords],
       context: place.b ? normalize(place.b, rules).split(" ").filter(Boolean) : [],
-      initials: [
-        words.map((w) => w[0]).join(""),
-        words
-          .filter((w) => !initialsSkip.has(w))
-          .map((w) => w[0])
-          .join(""),
-      ],
+      initials: [words, aliasWords]
+        .filter((ws) => ws.length > 0)
+        .flatMap((ws) => [
+          ws.map((w) => w[0]).join(""),
+          ws
+            .filter((w) => !initialsSkip.has(w))
+            .map((w) => w[0])
+            .join(""),
+        ]),
     };
   });
 
   const byRank = [...places].sort((a, b) => b.r - a.r || a.n.localeCompare(b.n));
 
   function tierOf(entry: Entry, query: string, tokens: string[][]): MatchTier | 0 {
-    if (entry.name === query) return 6;
-    if (entry.name.startsWith(query)) return 5;
+    if (entry.name === query || entry.alias === query) return 6;
+    if (entry.name.startsWith(query) || (entry.alias && entry.alias.startsWith(query))) return 5;
 
     let worst = 3; // the weakest word match decides the tier
     let inName = false;
