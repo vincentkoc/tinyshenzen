@@ -75,7 +75,7 @@ the render the restyle was made from), which have one consistent tone:
 4. Refill washed-out patches, where the restyle returned flat beige over
    buildings, from the house-styled original.
 
-The viewer-fog vignette is left alone. Use `--tone-region TX0,TY0,TX1,TY1`
+The edge is left alone: the pass tapers off from 384 px inside the coverage edge, never tones a pixel that is already viewer-fog beige, and only refills washes deep inside the city, so the vignette and fogline work stays as it was. A whole-city run caches its measurements and logs finished tiles (`.tone-measure.pkl`, `.tone-fields.npz`, `.tone-progress.txt`), so an interrupted run picks up where it stopped. Use `--tone-region TX0,TY0,TX1,TY1`
 with `--tone-out DIR` to preview a few tiles without touching the map. After a
 reslice, or after re-running an earlier pass, delete `.tone-src/` so it is
 seeded again.
