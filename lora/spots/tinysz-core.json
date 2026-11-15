@@ -1,8 +1,62 @@
 {
-  "note": "Global z0 pixels (tile * 512 + offset) on the tinysz-core grid; see --polish-spots in slice_frontend.py.",
-  "spots": [
-    {"kind": "water", "box": [3000, 14150, 4650, 15300], "sigma": 60, "where": "isolated water blob off Shekou, notched by tile edges"},
-    {"kind": "fog", "center": [10234, 12230], "radius": [90, 150], "where": "expressway stub ending in the fog north of Shekou"},
-    {"kind": "fog", "center": [10486, 12021], "radius": [45, 45], "where": "gray smudge in the fog beside it"}
-  ]
+    "note": "Global z0 pixels (tile * 512 + offset) on the tinysz-core grid; see --polish-spots in slice_frontend.py.",
+    "spots": [
+        {
+            "kind": "water",
+            "box": [
+                3000,
+                14150,
+                4650,
+                15300
+            ],
+            "sigma": 60,
+            "where": "isolated water blob off Shekou, notched by tile edges"
+        },
+        {
+            "kind": "fog",
+            "center": [
+                10234,
+                12230
+            ],
+            "radius": [
+                90,
+                150
+            ],
+            "where": "expressway stub ending in the fog north of Shekou"
+        },
+        {
+            "kind": "fog",
+            "center": [
+                10486,
+                12021
+            ],
+            "radius": [
+                45,
+                45
+            ],
+            "where": "gray smudge in the fog beside it"
+        },
+        {
+            "kind": "veil",
+            "box": [
+                50176,
+                27366,
+                52224,
+                27606
+            ],
+            "sigma": 40,
+            "where": "milky south-bank wash on the Shenzhen River west of Huanggang"
+        },
+        {
+            "kind": "veil",
+            "box": [
+                52224,
+                27136,
+                53000,
+                27580
+            ],
+            "sigma": 40,
+            "where": "milky veil over the river and bank at Huanggang"
+        }
+    ]
 }
