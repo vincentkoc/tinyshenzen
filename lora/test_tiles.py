@@ -18,6 +18,7 @@ import prepare_dataset
 import water_constrain as W
 import slice_frontend as SF
 import tiles as T
+import tone as TN
 from tiles import Tile
 
 
@@ -1905,6 +1906,122 @@ class SeamsPolishTest(unittest.TestCase):
             self.assertGreater(float(np.abs(stuck[:, 199].astype(int) - stuck[:, 200].astype(int)).mean()), before * 0.9)
 
 
+class HouseToneTest(unittest.TestCase):
+    """--polish-tone: one house tone over the restyle, no seams, detail kept."""
+
+    @staticmethod
+    def _orig_lab(h: int, w: int, seed: int = 0) -> np.ndarray:
+        rng = np.random.default_rng(seed)
+        yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+        lab = np.empty((h, w, 3), np.float32)
+        # Fields and dikes: a pattern with real detail, and some fine noise.
+        lab[..., 0] = 45 + 12 * ((np.sin(xx / 23.0) * np.sin(yy / 17.0)) > 0.3) + rng.normal(0, 1.5, (h, w))
+        lab[..., 1] = -25 + 4 * np.sin(xx / 41.0)
+        lab[..., 2] = 18 + 3 * np.cos(yy / 37.0)
+        return lab
+
+    @staticmethod
+    def _house(lab: np.ndarray) -> np.ndarray:
+        out = lab.copy()
+        out[..., 0] = 0.9 * lab[..., 0] + 8.0
+        out[..., 1] = 1.1 * lab[..., 1]
+        return out
+
+    def test_lab_round_trip(self):
+        rgb = np.random.default_rng(1).integers(0, 256, (64, 64, 3), dtype=np.uint8)
+        back = TN.lab_to_rgb(TN.rgb_to_lab(rgb))
+        self.assertLessEqual(int(np.abs(back.astype(int) - rgb).max()), 1)
+
+    def test_fit_recovers_a_global_colour_transform(self):
+        src = self._orig_lab(64, 64).reshape(-1, 3)
+        dst = self._house(src)
+        style = TN.fit_house_style(src, dst)
+        err = np.abs(TN.apply_house_style(style, src) - dst).max()
+        self.assertLess(float(err), 0.5)
+
+    def test_correction_evens_a_block_and_ignores_a_small_changed_patch(self):
+        res = np.zeros((96, 96, 3), np.float32)
+        res[:, 48:, 0] = 10.0  # the right half came back 10 L too dark
+        res[20:24, 10:14, 0] = 60.0  # a tower drawn on a field: content, not tone
+        corr, strength = TN.correction_field(res, np.ones((96, 96), np.float32), sigma=4.0)
+        self.assertGreater(float(corr[48, 80, 0]), 9.0)
+        self.assertLess(abs(float(corr[48, 16, 0])), 1.0)
+        self.assertLess(float(corr[22, 12, 0]), 3.0)
+        self.assertGreater(float(strength[48, 48]), 0.99)
+
+    def test_step_is_cancelled_only_where_the_restyle_jumps(self):
+        n = 200
+        rng = np.random.default_rng(2)
+        left = np.zeros((n, 6), np.float32)
+        right = np.zeros((n, 6), np.float32)
+        right[:, 3] = -9.0 + rng.normal(0, 0.5, n)  # restyle darker on the far side
+        right[:, 0] = 9.0
+        ok = np.ones(n, bool)
+        self.assertAlmostEqual(float(TN.step_stat(left, right, ok)[0]), 9.0, places=3)
+        only_orig = np.zeros((n, 6), np.float32)
+        only_orig[:, 0] = 9.0  # the original jumps, the restyle is flat
+        self.assertFalse(np.any(TN.step_stat(left, only_orig, ok)))
+        noisy = np.zeros((n, 6), np.float32)
+        noisy[:, 3] = rng.normal(0, 20, n)  # busy content, no seam
+        noisy[:, 0] = 5.0
+        self.assertFalse(np.any(TN.step_stat(left, noisy, ok)))
+
+    def test_step_field_jumps_at_the_line_and_fades_both_ways(self):
+        seg = np.array([[0, 100, 0, 400, 8.0, 0.0, 0.0]], np.float32)
+        f = TN.step_field(seg, 0, 0, 400, 400, reach=64, ramp=16)
+        row = f[200, :, 0]
+        self.assertAlmostEqual(float(row[100] - row[99]), 8.0, delta=0.2)
+        self.assertAlmostEqual(float(row[0]), 0.0, places=5)
+        self.assertAlmostEqual(float(row[199]), 0.0, places=5)
+        self.assertLess(float(np.abs(np.diff(row[110:180])).max()), 0.5)
+
+    def test_cell_field_is_continuous_across_a_tile_edge(self):
+        field = np.random.default_rng(3).normal(0, 5, (16, 16, 3)).astype(np.float32)
+        a = TN.sample_cells(field, 0, 0, 64)
+        b = TN.sample_cells(field, 64, 0, 64)
+        jump = np.abs(b[:, 0] - a[:, -1]).max()
+        inner = np.abs(np.diff(a, axis=1)).max()
+        self.assertLessEqual(float(jump), float(inner) + 1e-4)
+
+    def test_polish_tone_evens_a_dark_tile_without_a_seam_and_keeps_detail(self):
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            S = SF.TILE
+            cols, rows = 3, 2
+            orig = self._orig_lab(rows * S, cols * S)
+            rest = self._house(orig)
+            rest[:S, S : 2 * S, 0] -= 12.0  # one window came back darker
+            dest = tmp / "tiles-restyled"
+            proc = tmp / "tiles"
+            for ty in range(rows):
+                for tx in range(cols):
+                    sl = np.s_[ty * S : (ty + 1) * S, tx * S : (tx + 1) * S]
+                    for d, lab in ((dest, rest), (proc, orig)):
+                        (d / "0").mkdir(parents=True, exist_ok=True)
+                        Image.fromarray(TN.lab_to_rgb(lab[sl])).save(d / "0" / f"{tx}_{ty}.webp", lossless=True)
+            grid = {"cols": cols, "rows": rows, "ox": 0, "oy": 0}
+            SF.polish_tone(dest, grid, proc_dest=proc, workers=2)
+            out = np.zeros_like(orig)
+            for ty in range(rows):
+                for tx in range(cols):
+                    with Image.open(dest / "0" / f"{tx}_{ty}.webp") as im:
+                        out[ty * S : (ty + 1) * S, tx * S : (tx + 1) * S] = TN.rgb_to_lab(np.asarray(im.convert("RGB")))
+            means = [float(out[:S, tx * S : (tx + 1) * S, 0].mean()) for tx in range(cols)]
+            self.assertLess(max(means) - min(means), 2.0)
+            # No step left at the dark tile's edges.
+            for x in (S, 2 * S):
+                step = float(np.median(out[:S, x : x + 4, 0]) - np.median(out[:S, x - 4 : x, 0]))
+                self.assertLess(abs(step), 2.5)
+            # Detail survives: the dike pattern keeps its contrast.
+            self.assertGreater(float(out[:S, S : 2 * S, 0].std()), 0.85 * float(rest[:S, S : 2 * S, 0].std()))
+            self.assertTrue((dest / ".tone-src" / "0" / "1_0.webp").exists())
+            self.assertTrue((dest / ".tone-stamp").exists())
+            # Idempotent: a second run reads .tone-src and changes nothing.
+            before = (dest / "0" / "1_0.webp").read_bytes()
+            SF.polish_tone(dest, grid, proc_dest=proc, workers=2)
+            self.assertEqual(before, (dest / "0" / "1_0.webp").read_bytes())
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":
