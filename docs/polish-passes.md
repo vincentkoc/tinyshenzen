@@ -19,9 +19,10 @@ Higher zoom levels are rebuilt after every pass.
 | 3 | `--polish-fogline` | Near the edge, pixels whose surroundings are mostly fog (dashed traces, gray-washed windows, straight cut-offs) fade to beige along a feathered ramp. |
 | 4 | `--polish-mint --polish-spots FILE` | Mint: teal procedural-staging rims near the edge turn toward the restyled forest hue; real water and glass are left alone. Spots: one-off fixes listed in a JSON file. |
 
-Steps 1 to 3 need `--district` arguments, because they read the source restyle
-windows. Pass the step-2 flags together, and run each step on its own after the
-one before it.
+`--polish-vignette` needs `--district` arguments to reslice from the source
+windows, and `--polish-water` needs them for the district water masks. Passing
+the full `CORE` array every time covers both. Run one step per command, in
+order, and pass the step-2 flags together.
 
 ## Sources and re-runs
 
