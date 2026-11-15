@@ -1,252 +1,146 @@
 # Tiny Shenzhen
 
-An isometric pixel-art map of Shenzhen, China, in a fine naturalistic miniature style
-inspired by maps such as Pixel Singapore: the Civic Center, Ping An Finance Centre and
-the Futian CBD, teal glass towers, pastel mid-rises, dense urban villages, palms and the
-parks, generated from open data.
+[![Sponsor](https://img.shields.io/badge/sponsor-vincentkoc-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vincentkoc)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This project is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT
-Licence, © 2026 Nihey Takizawa): the same pipeline and viewer, with a Shenzhen city
-definition and a Shenzhen style. Nothing is drawn by hand. The default pipeline is procedural and needs no image model:
-building footprints and heights, streets, parks, water and trees go in; a pyramid of
-pixel-art tiles comes out. An optional `restyle` command can send those tiles to an image
-model if you provide a key (see below).
+An isometric pixel-art map of Shenzhen you can pan and zoom, from Shekou to Luohu Port.
+It is built from open data and drawn in a fine, naturalistic miniature style inspired by
+maps such as Pixel Singapore.
 
-## Cities
+![Tiny Shenzhen: the restyled Nanshan–Futian–Luohu map](docs/images/tinyshenzen-core.webp)
 
-| Id | What it covers |
-| --- | --- |
-| `tinysz` (default) | A roughly two-kilometre box around the Civic Center (22.5455° N, 114.0683° E), including Ping An Finance Centre and Lianhuashan Park. Use this first: it fetches and renders quickly. |
-| `tinysz-full` | The urban core: Futian, Nanshan, Luohu and neighbouring districts (lat 22.45–22.75, lon 113.80–114.30). This is a large extract; expect a long download and render. |
-| `tinysz-nanshan` | Nanshan core: Shekou, Houhai, the Science Park and OCT (lon 113.90–114.048, lat 22.47–22.564). Contiguous with the Futian test box on the east. |
-| `tinysz-luohu` | Luohu core: Caiwuwei, Dongmen and Luohu Port (lon 114.088–114.14, lat 22.522–22.564). Contiguous with the Futian test box on the west. |
-| `tinysz-core` | The three cores as one contiguous strip (Nanshan–Futian–Luohu). |
+Tiny Shenzhen is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT,
+© 2026 Nihey Takizawa). It uses the same pipeline and viewer, with a Shenzhen city
+definition and a Shenzhen style. Nothing is drawn by hand.
 
-The default style (`SHENZHEN` in `tinyworlds-pipeline/src/scene/styles.ts`) is a city-gated
-Pixel-Singapore-inspired look (`look.pixelsg`): muted warm-grey and beige concrete, teal and
-sky-blue glass with fine window grids, terracotta low roofs, pastel mid-rises, teal-green
-water, lush rounded tree canopies and subtle (not ink) outlines. A Habbo Hotel look remains
-available as `look.habbo` (with the `SHENZHEN_HABBO` materials). Other cities that share this
-pipeline are untouched. Named landmarks
-— Ping An Finance Centre, KK100, Window of the World, Shenzhen Bay Park, China Resources
-Headquarters, Shun Hing Square, the Civic Center and the Stock Exchange — are curated so they
-can be searched, and the towers get explicit materials, tapers and heights.
+## Features
 
-Data comes from [OpenStreetMap](https://www.openstreetmap.org/copyright) and the
-[Overture Maps Foundation](https://overturemaps.org/) (the buildings theme already mixes OSM
-with the East Asian Buildings dataset, doi:10.5281/zenodo.8174931, CC BY 4.0). Missing
-footprints, and per-building heights where OSM has neither height nor floors, come from
-[3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., 2024, CC BY 4.0),
-clipped to the city box from the Figshare tiles that cover Shenzhen. Heights that 3D-GloBFP
-does not cover are read from [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al.,
-2023, CC BY 4.0), a 10 m building-height raster for China. Priority is OSM height or floors,
-then 3D-GloBFP (one height per footprint), then CNBH, then a small fallback. Only 3D-GloBFP
-outlines that do not overlap an existing footprint are added. Overture's own fetch still
-needs no API key; 3D-GloBFP and CNBH are downloaded from Figshare and Zenodo, also publicly.
-Raw tiles are cached locally and are not committed.
+- **Procedural map from open data.** Building footprints and heights, streets, parks, water
+  and trees go in, and a pyramid of 512-px pixel-art tiles comes out. No API keys needed.
+- **A Shenzhen look.** Warm-grey concrete, teal and sky-blue glass with fine window grids,
+  terracotta low roofs, pastel mid-rises, dense urban villages, palms and rounded canopies.
+- **Curated landmarks.** Ping An Finance Centre, KK100, China Resources Headquarters, Shun
+  Hing Square, the Civic Center, the Stock Exchange, Window of the World and Shenzhen Bay
+  Park are searchable, and the towers get their own materials, tapers and heights.
+- **Optional restyle.** The live map is the procedural render redrawn with an image model,
+  checked against real land and water, then cleaned up with local polish passes. Settings
+  switches between the restyled and procedural layers.
 
-## Setup
+## Districts
 
-Requires Node 22+ and npm. The default pipeline needs no API keys: Overture is read from a public S3 bucket. The optional `restyle` command is the exception — it reads a key from the environment if you want it.
+| City id | Covers | In the viewer |
+| --- | --- | --- |
+| `tinysz` | About 2 km around the Civic Center: Ping An Finance Centre, Lianhuashan Park, the Futian CBD. Quick to fetch and render. | yes |
+| `tinysz-core` | Nanshan, Futian and Luohu as one strip. The default world. | yes |
+| `tinysz-nanshan` | Shekou, Houhai, the Science Park and OCT. | rendered for the restyle |
+| `tinysz-luohu` | Caiwuwei, Dongmen and Luohu Port. | rendered for the restyle |
+| `tinysz-full` | The wider urban core (lat 22.45–22.75, lon 113.80–114.30). A long download and render. | pipeline only |
+
+The city definitions are in `tinyworlds-pipeline/src/cities/tinysz.ts`, and the style is
+`SHENZHEN` in `tinyworlds-pipeline/src/scene/styles.ts`.
+
+## Quick start
+
+You need Node 22+ and npm.
 
 ```bash
-# 1. make the map (the small Futian box; a few minutes after the download)
+# 1. Make the Futian test box: fetch, scene, render and index
 cd tinyworlds-pipeline
 npm install
-npm run all -- --city tinysz     # fetch → scene → render → index
-                                 # into ../tinyworlds-frontend/public/data/tinysz
+npm run all -- --city tinysz
 
-# the full urban core, when you want it
-npm run all -- --city tinysz-full
-
-# 2. look at it
+# 2. View it at http://localhost:3000
 cd ../tinyworlds-frontend
 npm install
-NEXT_PUBLIC_WORLD=tinysz-core npm run dev # http://localhost:3000 (Nanshan–Futian–Luohu)
+NEXT_PUBLIC_WORLD=tinysz npm run dev
 ```
 
-Other pipeline commands, still from `tinyworlds-pipeline/`:
+`./dev.sh` runs the viewer and a pipeline shell side by side in tmux. Without
+`NEXT_PUBLIC_WORLD`, the viewer opens `tinysz-core`, which needs either the restyle below or
+a procedural `npm run all -- --city tinysz-core`.
+
+Other pipeline commands, run from `tinyworlds-pipeline/`:
 
 ```bash
-npm run fetch -- --city tinysz          # download only
-npm run cli -- --city tinysz scene      # build the scene from already-fetched data
-npm run render -- --city tinysz
-npm run cli -- --city tinysz preview --at 114.0683,22.5455
-npm run cli -- --city tinysz card       # share card into ../tinyworlds-frontend/public/og/
-npm run cli -- restyle --in preview.png # optional image-model restyle (needs a key)
+npm run fetch -- --city tinysz                              # download only
+npm run cli -- --city tinysz scene                          # rebuild the scene from fetched data
+npm run render -- --city tinysz                             # render tiles
+npm run cli -- --city tinysz preview --at 114.0683,22.5455  # one PNG around a point
+npm run cli -- --city tinysz card                           # share card
+npm test
 ```
 
-A Pixel-Singapore-inspired **image-edit LoRA**, trained on our own teacher
-tiles (procedural windows paired with `--look pixelsg` restyles — never on a
-third-party map), lives in [`lora/`](lora/README.md): dataset prep, a 24 GB
-Qwen-Image-Edit-2511 training script, and MultiDiffusion inference with the
-same overlapping hem as `restyle`. Teacher images and LoRA weights are not
-committed.
+## Restyle pipeline
 
-Generated tiles and raw extracts are not committed (`tinyworlds-pipeline/data/` and
-`tinyworlds-frontend/public/data/`). They are reproducible with the commands above.
+The restyled map comes from four scripts in [`lora/`](lora/):
 
-The original tinyworlds city ids (New York, Las Vegas, and the rest) are still in the pipeline
-if you want them; this repository is for Shenzhen.
-
-
-## Optional: restyle with an image model
-
-The map itself is still drawn by the procedural renderer. A richer isometric-pixel
-pass, inspired by maps such as Pixel Singapore (the look is described in words;
-we never send third-party map images to an API or use them as training data),
-is in [`lora/`](lora/README.md). The Futian test box (23,500×11,175 px) is
-restyled in overlapping 1024-px windows with a 256-px hem, then constrained
-against the renderer's real land and water, and sliced into the viewer's tile
-pyramid. The restyle is the default layer; Settings can switch back to the
-procedural tiles when both pyramids are present.
-
-From the repo root, with the pipeline built and `OPENAI_API_KEY` set (never
-print it or write it to a file):
-
-```bash
-# 1. procedural chunks of the Futian test box
-node --max-old-space-size=4096 lora/render_full.mjs --out /tmp/tinysz-futian
-
-# 2. tiled OpenAI restyle (--look pixelsg). Skips smooth fog windows.
-#    1024×1024 at high quality is US$0.0624 a window. Fog-skip on this box
-#    sent 190 of 465 windows, about US$11.86; 40 teacher tiles were
-#    US$2.50. A first attempt that invented a harbour was thrown away
-#    (US$1.25). All-in, about US$15.60, including the teacher tiles.
-#    Nanshan at medium quality: 941 non-fog windows, US$50.25.
-#    Luohu at medium quality: 275 non-fog windows, US$14.685.
-#    A short medium-vs-high sample was US$0.49. Total so far: about US$81.03.
-#    Do not restyle tinysz-full this way (thousands of dollars).
-python3 lora/restyle_map.py \
-  --chunks /tmp/tinysz-futian \
-  --out /tmp/tinysz-futian-restyled \
-  --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
-  --full /tmp/tinyshenzen-futian-restyled.png
-
-# For a larger box (tinysz-nanshan, tinysz-luohu), render with
-#   node --max-old-space-size=4096 lora/render_full.mjs --city tinysz-nanshan --out /tmp/tinysz-nanshan
-# then restyle at --quality medium, optionally sharded across workers that share
-# one --out directory. Each shard is resume-safe and only writes its own windows:
-#   python3 lora/restyle_map.py --chunks /tmp/tinysz-nanshan --out /tmp/tinysz-nanshan-restyled \
-#     --quality medium --shard 0/8 --concurrency 4
-#   python3 lora/restyle_map.py --chunks /tmp/tinysz-nanshan --out /tmp/tinysz-nanshan-restyled --stitch-only
-# `--count-only` reports non-fog windows (the ones that would be billed) with no API calls.
-# `--windows x,y;x,y` restyles an explicit list. The pipeline CLI also accepts
-# `--quality medium` on a single image: `npm run cli -- restyle --in p.png --look pixelsg --quality medium`.
-
-# 3. land/water constraint (free): composite procedural pixels back wherever
-#    the restyle invented water on land, or paved over real water. Open land
-#    is tone-matched so the patch is not a flat beige sheet. Invented rooftop
-#    gardens on built roofs are restored to the procedural roof.
-node --max-old-space-size=4096 lora/render_water_mask.mjs \
-  --out /tmp/tinysz-futian/water_mask.png
-python3 lora/water_constrain.py \
-  --chunks /tmp/tinysz-futian \
-  --restyled /tmp/tinysz-futian-restyled \
-  --mask /tmp/tinysz-futian/water_mask.png \
-  --preview /tmp/tinyshenzen-futian-restyled-preview.jpg \
-  --full /tmp/tinyshenzen-futian-restyled.png
-
-# 4. slice both pyramids into the viewer (generated tiles are gitignored).
-#    For the three-district core, slice tile-wise from each district's
-#    constrained windows so a full-size canvas is never decoded:
-#    python3 lora/slice_frontend.py --chunks /tmp/tinysz-core \
-#      --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
-#      --district /tmp/tinysz-nanshan:/tmp/tinysz-nanshan-restyled/tiles-constrained \
-#      --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
-#      --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
-#      --tilewise
-# Districts are reprojected from their own geo origin (Houhai, Caiwuwei)
-# into the core world's Civic Center origin.
-#
-# After slicing, a free --polish pass feathers the dark renderer fog at
-# the map edge into the viewer's beige (no stair-stepped border at low
-# zoom) and fills blocky or missing bay water from the land/water mask
-# with a tone-matched sample. --polish-vignette is the preferred free
-# edge pass: it reslices the edge from the source restyle windows (not
-# from already-faded tiles), keeps the bay-water fill and south-shore
-# land restore, builds one coarse coverage mask with a wide blur and
-# morphological close/open so the boundary does not follow source-tile
-# edges, bicubically upsamples the distance field, and applies a single
-# vignette (~1–2 tiles) to viewer beige whose falloff is displaced by
-# low-frequency noise so the edge looks organic rather than stepped.
-# Changing fade or smoothing parameters reuses the clean staging and
-# only rebuilds the field and fade. It is resume-safe and idempotent
-# from source. Do not run --polish immediately before it: the per-tile
-# feather is what made the quilted fade. --polish-edge is the earlier
-# global-fade attempt and is kept for the existing tests.
-# Afterwards, --polish-water --polish-forest (passed together, same
-# --district flags) put the bay on one teal with its texture kept and
-# no tile-seam steps, give water its own fade to beige, and cross-fade
-# the gray-washed land just inside the edge to the clean staging.
-# --polish-flats (with them) fades featureless blotches near the edge
-# into the fog and evens forest greens inland too. Last, on its own,
-# --polish-fogline fades dashed traces, gray-washed windows and straight
-# cut-offs at the fog boundary with a feathered ramp. Then --polish-mint
-# turns teal staging rims forest green, and --polish-spots
-# lora/spots/tinysz-core.json applies a few listed one-off fixes. All
-# free and idempotent from snapshots.
-# python3 lora/slice_frontend.py \
-#   --chunks /tmp/tinysz-core \
-#   --out tinyworlds-frontend/public/data/tinysz-core --name tinysz-core \
-#   --district /tmp/tinysz-nanshan:/tmp/tinysz-nanshan-restyled/tiles-constrained \
-#   --district /tmp/tinysz-futian:/tmp/tinysz-futian-restyled/tiles-constrained \
-#   --district /tmp/tinysz-luohu:/tmp/tinysz-luohu-restyled/tiles-constrained \
-#   --polish-vignette
-# (then the same command with --polish-water --polish-forest --polish-flats,
-#  then --polish-fogline, then --polish-mint --polish-spots lora/spots/tinysz-core.json)
-python3 lora/slice_frontend.py \
-  --image /tmp/tinyshenzen-futian-restyled.png \
-  --chunks /tmp/tinysz-futian \
-  --out tinyworlds-frontend/public/data/tinysz \
-  --restyle-dir tiles-restyled --procedural-dir tiles
-cd tinyworlds-pipeline && TINY_OUT=../tinyworlds-frontend/public/data \
-  npm run cli -- --city tinysz-core index
-cd ../tinyworlds-frontend && NEXT_PUBLIC_WORLD=tinysz-core npm run dev
+```text
+render_full.mjs ──► restyle_map.py ──► water_constrain.py ──► slice_frontend.py ──► viewer
 ```
 
-A single-window restyle of a preview still works through the pipeline CLI
-(`npm run cli -- restyle --in preview.png --out out.png --look pixelsg`).
+1. `render_full.mjs` renders a district as procedural chunks.
+2. `restyle_map.py` redraws them in overlapping 1024-px windows with an image model. This
+   is the only step that calls an API. It sends only our own renders.
+3. `water_constrain.py` puts the real land and water back wherever the model invented a
+   river or paved over the bay.
+4. `slice_frontend.py` slices the districts into one tile pyramid, then runs free,
+   idempotent polish passes:
 
-To train our own image-edit LoRA on those teacher tiles (Qwen-Image-Edit-2511,
-a 24 GB GPU, MultiDiffusion over the same hem) see [`lora/README.md`](lora/README.md).
-Teacher images and weights are not committed. That path needs a rented GPU
-(roughly US$2–6 for train plus a Futian infer) and is not started from this
-repository's default setup.
+| Pass | Fixes |
+| --- | --- |
+| `--polish-vignette` | Hard map edge: one smooth fade to the viewer's beige |
+| `--polish-water --polish-forest --polish-flats` | Tile steps in the bay, gray-washed land and featureless flats near the edge |
+| `--polish-fogline` | Dashed roads and straight cut-offs trailing into the fog |
+| `--polish-mint --polish-spots FILE` | Mint forest rims, plus a short list of one-off fixes |
+
+Full commands are in [docs/pipeline.md](docs/pipeline.md), and each pass is described in
+[docs/polish-passes.md](docs/polish-passes.md). [`lora/README.md`](lora/README.md) covers
+training an image-edit LoRA on our own procedural and restyled pairs.
+
+The look is described in words. No third-party map images are sent to an API, used for
+training, or shipped.
+
+## Data
+
+- [OpenStreetMap](https://www.openstreetmap.org/copyright) for streets, parks, water,
+  landmarks, and heights where they are tagged.
+- [Overture Maps](https://overturemaps.org/) buildings, which merge OSM with the
+  [East Asian Buildings](https://doi.org/10.5281/zenodo.8174931) dataset. Read from a public
+  bucket, no key needed.
+- [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., 2024) for missing
+  footprints and per-building heights.
+- [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., 2023), a 10 m height raster
+  for China, for the heights left over.
+
+Heights come from OSM height or floors first, then 3D-GloBFP, then CNBH, then a small
+fallback. Raw extracts and generated tiles (`tinyworlds-pipeline/data/`,
+`tinyworlds-frontend/public/data/`) are not committed; the commands above rebuild them.
 
 ## Layout
 
 | Path | What |
-|------|------|
-| `tinyworlds-pipeline/` | TypeScript CLI: downloads the data, builds the scene, renders the tiles and indexes |
-| `tinyworlds-frontend/` | Next.js 16 static site: the map viewer |
+| --- | --- |
+| `tinyworlds-pipeline/` | TypeScript CLI: fetches data, builds the scene, renders and indexes tiles |
+| `tinyworlds-frontend/` | Next.js static site: the map viewer |
+| `lora/` | Restyle, water constraint, slicing and polish scripts, plus LoRA training |
+| `docs/` | Pipeline guide, polish-pass reference and the README screenshot |
+| `docs/superpowers/` | Design specs and plans inherited from upstream tinyworlds |
 
-The upstream tinyworlds API, video films, deploy scripts and GitHub Actions workflows are not
-included here.
+The upstream tinyworlds cities are still in the pipeline and viewer. The upstream API,
+videos, deploy scripts and workflows are not included.
 
-## Licence and attribution
+## License and credits
 
-Code is [MIT](LICENSE). The pipeline and viewer originated in
-[nihey/tinyworlds](https://github.com/nihey/tinyworlds), © 2026 Nihey Takizawa; modifications
-for Tiny Shenzhen are © 2026 Vincent Koc. The MIT notice is kept in full.
+Code is [MIT](LICENSE): © 2026 Nihey Takizawa for tinyworlds, and © 2026 Vincent Koc for the
+Tiny Shenzhen changes.
 
-Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL) and the
-[Overture Maps Foundation](https://overturemaps.org/). Supplementary footprints and per-building
-heights come from [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che, Y., Li, X.,
-Liu, X., et al., 2024, CC BY 4.0). Remaining unmapped heights are taken from
-[CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu, W., et al., 2023, CC BY 4.0).
-The rendered tiles carry those attribution requirements.
+Map data © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL) and
+the [Overture Maps Foundation](https://overturemaps.org/). 3D-GloBFP (Che, Y., Li, X., Liu, X.,
+et al., 2024), CNBH-10m (Wu, W., et al., 2023) and East Asian Buildings are CC BY 4.0. The
+rendered tiles carry these attribution requirements.
 
 The idea of a city redrawn tile by tile as isometric pixel art comes from
-[tinyrj](https://tinyrj.com/) and isometric.nyc, as credited by tinyworlds. The
-painted look of the optional restyle is inspired by maps such as Pixel Singapore;
-this is an independent work, and no third-party map images are used or shipped.
+[tinyrj](https://tinyrj.com/) and isometric.nyc, as tinyworlds credits. The restyled look is
+inspired by Pixel Singapore. This is an independent work and uses none of its images.
 
-## Credits
-
-- [Nihey Takizawa](https://github.com/nihey) and [tinyworlds](https://github.com/nihey/tinyworlds)
-- [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors
-- [Overture Maps Foundation](https://overturemaps.org/)
-- [East Asian Buildings](https://doi.org/10.5281/zenodo.8174931) (CC BY 4.0), via Overture
-- [3D-GloBFP](https://doi.org/10.1038/s41597-024-03917-6) (Che et al., CC BY 4.0)
-- [CNBH-10m](https://doi.org/10.5281/zenodo.7923866) (Wu et al., CC BY 4.0)
+If you enjoy the map, you can [sponsor its development](https://github.com/sponsors/vincentkoc).
