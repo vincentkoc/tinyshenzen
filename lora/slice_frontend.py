@@ -4405,11 +4405,400 @@ def polish_tone(
     return present_from_disk(dest, cols, rows)
 
 
-def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
+# --- gaps: find and fill holes in the city (see gaps.py) -------------------
+
+_GAPS: dict = {}
+
+
+def _gaps_load(path: Path) -> np.ndarray | None:
+    if not path.exists():
+        return None
+    with Image.open(path) as im:
+        return np.asarray(im.convert("RGB")).copy()
+
+
+def _gaps_read_crop(z0: Path | list[Path], box: tuple[int, int, int, int], fill=VIEW_FOG) -> np.ndarray:
+    """Grid-pixel box (x0, y0, x1, y1) from z0 tiles; the first dir that has a tile wins."""
+    dirs = z0 if isinstance(z0, list) else [z0]
+    x0, y0, x1, y1 = box
+    out = np.empty((y1 - y0, x1 - x0, 3), np.uint8)
+    out[:] = fill
+    for ty in range(max(0, y0 // TILE), (y1 - 1) // TILE + 1):
+        for tx in range(max(0, x0 // TILE), (x1 - 1) // TILE + 1):
+            arr = None
+            for d in dirs:
+                arr = _gaps_load(d / f"{tx}_{ty}.webp")
+                if arr is not None:
+                    break
+            if arr is None:
+                continue
+            ix0, iy0 = max(x0, tx * TILE), max(y0, ty * TILE)
+            ix1, iy1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
+            out[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0] = arr[iy0 - ty * TILE : iy1 - ty * TILE, ix0 - tx * TILE : ix1 - tx * TILE]
+    return out
+
+
+def _gaps_window_crops(box: tuple[int, int, int, int], region_px: np.ndarray) -> list[tuple[np.ndarray, np.ndarray, dict]]:
+    """Each restyle window's own pixels over a grid-pixel box, skipping windows that
+    are an unrestyled copy of the procedural render (fog windows) or miss the region."""
+    import gaps as GP
+
+    grid = _GAPS["grid"]
+    x0, y0, x1, y1 = box
+    W, H = x1 - x0, y1 - y0
+    out = []
+    for di, d in enumerate(_GAPS["districts"]):
+        lx = grid["ox"] + x0 - d["origin"][0]
+        ly = grid["oy"] + y0 - d["origin"][1]
+        if lx + W <= 0 or ly + H <= 0 or lx >= d["width"] or ly >= d["height"]:
+            continue
+        proc = None
+        for t in d["windows"]:
+            if t.x + t.w <= lx or t.x >= lx + W or t.y + t.h <= ly or t.y >= ly + H:
+                continue
+            path = d["tiles"] / f"{t.x}_{t.y}.png"
+            if not path.exists():
+                continue
+            iy0, iy1 = max(t.y, ly), min(t.y + t.h, ly + H)
+            ix0, ix1 = max(t.x, lx), min(t.x + t.w, lx + W)
+            cov = np.zeros((H, W), bool)
+            cov[iy0 - ly : iy1 - ly, ix0 - lx : ix1 - lx] = True
+            if int((cov & region_px).sum()) < 256 * GP.GAP_MIN_CELLS // 2:
+                continue
+            with Image.open(path) as im:
+                im = im.convert("RGB")
+                if im.size != (t.w, t.h):
+                    im = im.resize((t.w, t.h), Image.Resampling.NEAREST)
+                a = np.asarray(im)
+            rgb = np.zeros((H, W, 3), np.uint8)
+            rgb[iy0 - ly : iy1 - ly, ix0 - lx : ix1 - lx] = a[iy0 - t.y : iy1 - t.y, ix0 - t.x : ix1 - t.x]
+            if proc is None:
+                proc = _gaps_district_proc(d, lx, ly, W, H)
+            if proc is not None:
+                diff = np.abs(rgb.astype(np.int16) - proc.astype(np.int16)).mean(axis=2)[cov]
+                if float(diff.mean()) < GP.GAP_WIN_COPY:
+                    continue
+            out.append((rgb, cov, {"district": Path(d["chunks"]).name, "window": [t.x, t.y]}))
+    return out
+
+
+def _gaps_district_proc(d: dict, lx: int, ly: int, w: int, h: int) -> np.ndarray | None:
+    """The district's own procedural render over a local box (from its chunks)."""
+    chunk = int(d["meta"].get("chunk") or 2048)
+    cdir = d["chunks"] / "chunks"
+    if not cdir.is_dir():
+        return None
+    out = np.empty((h, w, 3), np.uint8)
+    out[:] = VIEW_FOG
+    for r in range(max(0, ly // chunk), (ly + h - 1) // chunk + 1):
+        for c in range(max(0, lx // chunk), (lx + w - 1) // chunk + 1):
+            p = cdir / f"{c}_{r}.png"
+            if not p.exists():
+                continue
+            with Image.open(p) as im:
+                a = np.asarray(im.convert("RGB"))
+            iy0, iy1 = max(r * chunk, ly), min(r * chunk + a.shape[0], ly + h)
+            ix0, ix1 = max(c * chunk, lx), min(c * chunk + a.shape[1], lx + w)
+            if iy1 <= iy0 or ix1 <= ix0:
+                continue
+            out[iy0 - ly : iy1 - ly, ix0 - lx : ix1 - lx] = a[iy0 - r * chunk : iy1 - r * chunk, ix0 - c * chunk : ix1 - c * chunk]
+    return out
+
+
+def _gaps_src_tile(name: str) -> np.ndarray | None:
+    """A source z0 tile: the backed-up original when there is one, so a re-run starts over."""
+    for d in _GAPS["src"]:
+        arr = _gaps_load(d / name)
+        if arr is not None:
+            return arr
+    return None
+
+
+def _gaps_cells(key: tuple[int, int]):
+    import gaps as GP
+
+    tx, ty = key
+    cur = _gaps_src_tile(f"{tx}_{ty}.webp")
+    orig = _gaps_load(_GAPS["orig0"] / f"{tx}_{ty}.webp")
+    if cur is None or orig is None:
+        return tx, ty, None
+    lab, det = GP.cell_detail(cur)
+    olab, _ = GP.cell_detail(orig)
+    st = GP.cell_structure(cur, orig)
+    return tx, ty, (lab, det, olab, st)
+
+
+def _gaps_fill_one(gap):
+    import gaps as GP
+
+    C = GP.GAP_CELL
+    x0, y0, x1, y1 = (v * C for v in gap.bbox)
+    M = GP.GAP_MARGIN
+    W, H = _GAPS["W"], _GAPS["H"]
+    box = (max(0, x0 - M), max(0, y0 - M), min(W, x1 + M), min(H, y1 + M))
+    cs = np.s_[box[1] // C : box[3] // C, box[0] // C : box[2] // C]
+    lab = _GAPS["lab"][cs]
+    region = lab == gap.id
+    score = _GAPS["score"][cs]
+    good = (score < 0.15) & (_GAPS["city"][cs] > 0.5) & (lab == 0)
+    cur = _gaps_read_crop(_GAPS["src"], box)
+    orig = _gaps_read_crop(_GAPS["orig0"], box, fill=(0x1A, 0x1E, 0x1C))
+    region_px = np.repeat(np.repeat(region, C, 0), C, 1)
+    wins = _gaps_window_crops(box, region_px)
+    fill, alpha, used = GP.fill_region(cur, orig, _GAPS["style"], region, score, good,
+                                       [(w[0], w[1]) for w in wins], pure=True)
+    a = alpha[..., None]
+    blended = np.clip(np.rint(cur * (1.0 - a) + fill * a), 0, 255).astype(np.uint8)
+    # Do not make things worse: re-score the filled crop and drop a fill that does not help.
+    ok, before, after = GP.verify_fill(cur, blended, orig, _GAPS["city"][cs], region)
+    if not ok:
+        return gap.id, box, fill, np.zeros(alpha.shape, np.float16), [
+            {"source": "kept", "score_before": round(before, 3), "score_after": round(after, 3)}]
+    used = [dict(u, score_before=round(before, 3), score_after=round(after, 3)) for u in used]
+    for u in used:
+        if u["source"] == "window":
+            u.update(wins[u.pop("index")][2])
+    return gap.id, box, fill, alpha.astype(np.float16), used
+
+
+def gaps_fields(src: list[Path], proc_dest: Path, grid: dict, present: set[tuple[int, int]], workers: int = 8) -> dict:
+    """Global 16-px cell fields of the current restyle and the original (one pass)."""
+    import multiprocessing as mp
+
+    import gaps as GP
+
+    C = TILE // GP.GAP_CELL
+    H, W = grid["rows"] * C, grid["cols"] * C
+    F = {k: np.zeros((H, W, 3), np.float32) for k in ("cl", "ol")}
+    F.update({k: np.zeros((H, W), np.float32) for k in ("cd", "ncc", "sc", "so", "ec", "eo", "po")})
+    F["ok"] = np.zeros((H, W), bool)
+    _GAPS.update(src=src, orig0=proc_dest / "0")
+    with mp.get_context("fork").Pool(workers) as pool:
+        for tx, ty, r in pool.imap_unordered(_gaps_cells, sorted(present), chunksize=8):
+            if r is None:
+                continue
+            s = np.s_[ty * C : (ty + 1) * C, tx * C : (tx + 1) * C]
+            F["cl"][s], F["cd"][s], F["ol"][s] = r[0], r[1], r[2]
+            for k, v in r[3].items():
+                F[k][s] = v
+            F["ok"][s] = True
+    return F
+
+
+def gaps_city(F: dict, dest: Path) -> np.ndarray:
+    """0..1 city weight: original content, not its edge fog, deep inside the restyle coverage."""
+    import gaps as GP
+    import tone as TN
+
+    pad = TN.rgb_to_lab(np.array((0x1A, 0x1E, 0x1C), np.uint8))
+    fog = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
+    ol = F["ol"]
+    m = (F["ok"] & (np.linalg.norm(ol - pad, axis=-1) > 8) & (np.linalg.norm(ol - fog, axis=-1) > 4)).astype(np.float32)
+    dist_path = dest / ".vignette-dist.npz"
+    if dist_path.exists():
+        f = np.load(dist_path)["field"]
+        rep = VIGNETTE_SCALE // GP.GAP_CELL
+        if rep > 1:
+            f = np.repeat(np.repeat(f, rep, 0), rep, 1)
+        deep = np.zeros_like(m)
+        h, w = min(f.shape[0], m.shape[0]), min(f.shape[1], m.shape[1])
+        deep[:h, :w] = 1.0 - TN.smoothstep(f[:h, :w], *GP.GAP_DEEP)
+        m = m * deep
+    return m
+
+
+def detect_gaps(F: dict, city: np.ndarray, grid: dict, districts: list[dict] | None) -> dict:
+    import gaps as GP
+
+    score, void = GP.gap_score(F["cl"], F["cd"], city, F)
+    xl, yl = tone_candidate_lines(grid, districts)
+    found, lab = GP.find_gaps(score, void, xl, yl)
+    blurry = GP.blurry_tiles(F["ec"], F["eo"], city)
+    return {"score": score, "void": void, "lab": lab, "gaps": found, "blurry": blurry}
+
+
+def gaps_sheet(rows: list[dict], cols: list[list[Path]], out: Path, *, n: int = 40, cell: int = 300,
+               per_row: int = 4, titles: list[str] | None = None) -> None:
+    """Contact sheet of the worst `n` gaps: one crop per source column (original, before, after)."""
+    from PIL import ImageDraw
+
+    rows = rows[:n]
+    k = len(cols)
+    R = max(1, (len(rows) + per_row - 1) // per_row)
+    im = Image.new("RGB", (per_row * (k * cell + 12), R * (cell + 22)), (30, 30, 30))
+    draw = ImageDraw.Draw(im)
+    for i, g in enumerate(rows):
+        x0, y0, x1, y1 = g["px_box"]
+        cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+        w = min(max(x1 - x0 + 192, 384), 1400)
+        h = min(max(y1 - y0 + 192, 384), 1400)
+        box = (max(0, cx - w // 2), max(0, cy - h // 2), max(0, cx - w // 2) + w, max(0, cy - h // 2) + h)
+        X, Y = (i % per_row) * (k * cell + 12), (i // per_row) * (cell + 22)
+        for j, src in enumerate(cols):
+            c = Image.fromarray(_gaps_read_crop(src, box))
+            c.thumbnail((cell, cell))
+            im.paste(c, (X + j * cell, Y + 20))
+        src_txt = "+".join(sorted({u["source"] for u in g.get("used", [])})) or "-"
+        draw.text((X + 2, Y + 4), f"#{i + 1} {g['kind']} {g['area_px'] // 1000}k px t{g['tiles'][0]} {src_txt}", fill=(255, 255, 0))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    im.save(out, quality=88)
+
+
+def rebuild_parents(dest: Path, out: Path, changed: set[tuple[int, int]], grid: dict,
+                    present0: set[tuple[int, int]], pad_rgb=VIEW_FOG) -> int:
+    """Rebuild only the pyramid tiles above `changed` z0 tiles, exactly as
+    `_pyramid_from_z0` would. Children are read from `out` first, then `dest`;
+    parents are written to `out`. Returns the number of tiles written."""
+    cols, rows = grid["cols"], grid["rows"]
+    prev_present = set(present0)
+    dirty = set(changed)
+    written = 0
+    z = 1
+    z_cols, z_rows = cols, rows
+    while z_cols > 1 or z_rows > 1:
+        z_cols, z_rows = (z_cols + 1) // 2, (z_rows + 1) // 2
+        parents = {(x // 2, y // 2) for x, y in dirty}
+        level_present = {(x // 2, y // 2) for x, y in prev_present}
+        for tx, ty in sorted(parents):
+            big = Image.new("RGB", (TILE * 2, TILE * 2), pad_rgb)
+            any_child = False
+            for dy in range(2):
+                for dx in range(2):
+                    cx, cy = tx * 2 + dx, ty * 2 + dy
+                    if (cx, cy) not in prev_present:
+                        continue
+                    for base in (out, dest):
+                        child = base / str(z - 1) / f"{cx}_{cy}.webp"
+                        if child.exists():
+                            with Image.open(child) as im:
+                                big.paste(im.convert("RGB"), (dx * TILE, dy * TILE))
+                            any_child = True
+                            break
+            if not any_child:
+                continue
+            small = big.resize((TILE, TILE), Image.Resampling.LANCZOS)
+            if _almost_empty(np.asarray(small), pad_rgb):
+                continue
+            _atomic_save_webp(small, out / str(z) / f"{tx}_{ty}.webp", lossless=False)
+            written += 1
+        prev_present = level_present
+        dirty = parents
+        z += 1
+    return written
+
+
+def polish_gaps(
+    dest: Path,
+    grid: dict,
+    *,
+    proc_dest: Path | None,
+    districts: list[dict] | None = None,
+    stage: Path | None = None,
+    report: Path | None = None,
+    backup: Path | None = None,
+    workers: int = 8,
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Find gaps in the city and fill them for free (see gaps.py).
+
+    Writes changed z0 tiles to `stage/<restyle_dir>/0` when `stage` is set
+    (the live map is not touched), else in place after copying the touched
+    tiles to `backup`. `report` gets gaps.json and a contact sheet (original,
+    before, after). Returns (present, changed).
+    """
+    import multiprocessing as mp
+
+    import gaps as GP
+    import tone as TN
+
+    t0 = time.time()
+    if proc_dest is None or not (proc_dest / "0").is_dir():
+        raise SystemExit("--polish-gaps needs the procedural tiles (the original the restyle was made from)")
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    # Re-runs start from the backed-up originals of tiles an earlier run changed.
+    src = ([backup / "0"] if backup is not None and (backup / "0").is_dir() else []) + [dest / "0"]
+    F = gaps_fields(src, proc_dest, grid, present, workers)
+    city = gaps_city(F, dest)
+    det = detect_gaps(F, city, grid, districts)
+    found = det["gaps"]
+    print(f"  gaps: {len(found)} regions, {sum(g.cells for g in found)} cells, "
+          f"{len(det['blurry'])} blurry tiles, {time.time() - t0:.0f}s", flush=True)
+    v = (city > 0.5) & (det["score"] < 0.1) & F["ok"]
+    style = TN.fit_house_style(F["ol"][v], F["cl"][v])
+    _GAPS.update(
+        grid=grid, districts=districts or [], src=src, orig0=proc_dest / "0", style=style,
+        lab=det["lab"], score=det["score"], city=city, H=rows * TILE, W=cols * TILE,
+    )
+    del F
+    out0 = (stage / dest.name / "0") if stage is not None else dest / "0"
+    out0.mkdir(parents=True, exist_ok=True)
+    tiles: dict[tuple[int, int], np.ndarray] = {}
+    used_by: dict[int, list[dict]] = {}
+    ctx = mp.get_context("fork")
+    with ctx.Pool(workers) as pool:
+        for n, (gid, box, fill, alpha, used) in enumerate(pool.imap_unordered(_gaps_fill_one, found, chunksize=1), 1):
+            used_by[gid] = used
+            x0, y0, x1, y1 = box
+            a = alpha.astype(np.float32)
+            for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
+                for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
+                    if (tx, ty) not in present:
+                        continue
+                    ix0, iy0 = max(x0, tx * TILE), max(y0, ty * TILE)
+                    ix1, iy1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
+                    sa = a[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0]
+                    if float(sa.max()) <= 2e-3:
+                        continue
+                    if (tx, ty) not in tiles:
+                        tiles[(tx, ty)] = _gaps_src_tile(f"{tx}_{ty}.webp").astype(np.float32)
+                    t = tiles[(tx, ty)]
+                    ts = np.s_[iy0 - ty * TILE : iy1 - ty * TILE, ix0 - tx * TILE : ix1 - tx * TILE]
+                    sf = fill[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0].astype(np.float32)
+                    t[ts] = t[ts] * (1.0 - sa[..., None]) + sf * sa[..., None]
+            if n % 50 == 0:
+                print(f"  gaps filled {n}/{len(found)}, {len(tiles)} tiles, {time.time() - t0:.0f}s", flush=True)
+    changed: set[tuple[int, int]] = set()
+    if backup is not None and stage is None:
+        (backup / "0").mkdir(parents=True, exist_ok=True)
+        # A tile an earlier run changed but this one does not: put the original back.
+        for p in sorted((backup / "0").glob("*.webp")):
+            tx, ty = (int(v) for v in p.stem.split("_"))
+            if (tx, ty) not in tiles:
+                tiles[(tx, ty)] = _gaps_load(p).astype(np.float32)
+    for (tx, ty), arr in sorted(tiles.items()):
+        out = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
+        src = dest / "0" / f"{tx}_{ty}.webp"
+        cur = _gaps_load(src)
+        if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+            continue
+        if backup is not None and stage is None and not (backup / "0" / src.name).exists():
+            shutil.copy2(src, backup / "0" / src.name)
+        _atomic_save_webp(Image.fromarray(out, "RGB"), out0 / src.name, lossless=True)
+        changed.add((tx, ty))
+    print(f"  gaps: {len(changed)} z0 tiles changed, {time.time() - t0:.0f}s", flush=True)
+    if report is not None:
+        report.mkdir(parents=True, exist_ok=True)
+        rows_out = []
+        for g in found:
+            r = g.row()
+            r["used"] = used_by.get(g.id, [])
+            rows_out.append(r)
+        (report / "gaps.json").write_text(json.dumps(
+            {"version": GP.GAP_VERSION, "gaps": rows_out, "blurry_tiles": det["blurry"],
+             "changed": sorted([list(t) for t in changed])}, indent=1) + "\n")
+        before = [backup / "0"] if (backup is not None and (backup / "0").is_dir()) else []
+        gaps_sheet(rows_out, [[proc_dest / "0"], before + [dest / "0"], [out0, dest / "0"]], report / "sheet.jpg")
+    _GAPS.clear()
+    return present, changed
+
+
+def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
+                           overlay: Path | None = None) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
     Each tile is resized to the rounded span between this cell and the
-    next so neighbours abut. A single shared width plus a truncated
+    next so neighbours abut. A tile in `overlay/0` replaces the one in
+    `dest/0` (a staged pass). A single shared width plus a truncated
     paste position left one-pixel gaps of pad (a visible grid on the
     minimap) whenever `TILE * scale` was not an integer.
     """
@@ -4437,9 +4826,12 @@ def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int
             tw, th = x1 - x0, y1 - y0
             if tw < 1 or th < 1 or x0 >= pw or y0 >= ph:
                 continue
+            if overlay is not None and (overlay / "0" / path.name).exists():
+                path = overlay / "0" / path.name
             with Image.open(path) as im:
                 small = im.convert("RGB").resize((tw, th), Image.Resampling.LANCZOS)
             prev.paste(small, (x0, y0))
+    out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "overview.webp"
     prev.save(path, "WEBP", quality=86, method=2)
     return {"src": "overview.webp", "width": pw, "height": ph}
@@ -4529,6 +4921,32 @@ def main() -> None:
         "--polish-tone",
         action="store_true",
         help="after spots, instead of --polish-seams: one house tone over the whole restyle (global original->restyle colour fit, seam-step solve, robust low-pass correction, washed patches refilled); free, idempotent from .tone-src",
+    )
+    ap.add_argument(
+        "--polish-gaps",
+        action="store_true",
+        help="last: find beige voids, ghostly veils, cut-offs and blurry patches inside the city and fill them from an intact overlapping restyle window, else the house-styled original (free, no API)",
+    )
+    ap.add_argument(
+        "--gaps-stage",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="with --polish-gaps: write changed tiles, their pyramid parents, the overview and the manifest to DIR (same layout as --out) and leave the map untouched",
+    )
+    ap.add_argument(
+        "--gaps-report",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="with --polish-gaps: write gaps.json (ranked list, sources used) and sheet.jpg (worst 40: original, before, after)",
+    )
+    ap.add_argument(
+        "--gaps-backup",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="with --polish-gaps in place: copy each z0 tile to DIR/0 before changing it",
     )
     ap.add_argument(
         "--tone-region",
@@ -4635,13 +5053,34 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
         pdest = args.out / args.procedural_dir
         proc_dest = pdest if (pdest / "0").is_dir() else None
-        if args.polish:
+        if args.polish_gaps:
+            target = args.gaps_stage if args.gaps_stage is not None else args.out
+            print(f"  gaps → {target / args.restyle_dir}", flush=True)
+            z0_present, changed = polish_gaps(
+                dest, grid,
+                proc_dest=proc_dest,
+                districts=districts,
+                stage=args.gaps_stage,
+                report=args.gaps_report,
+                backup=args.gaps_backup,
+            )
+            if not changed:
+                print("  gaps: nothing to change", flush=True)
+                return
+            written = rebuild_parents(dest, target / args.restyle_dir, changed, grid, z0_present, pad_rgb=VIEW_FOG)
+            print(f"  gaps: rebuilt {written} pyramid tiles above them", flush=True)
+            overview = write_overview_from_z0(dest, grid, target, pad_rgb=VIEW_FOG,
+                                              overlay=(target / args.restyle_dir) if args.gaps_stage is not None else None)
+            existing = json.loads((args.out / "manifest.json").read_text())
+            restyle_levels = existing["levels"]
+            args._manifest_dir = target
+        elif args.polish:
             print(f"  polishing restyle z0 → {dest}", flush=True)
             z0_present = polish_z0_tiles(
                 dest, grid,
@@ -4711,9 +5150,10 @@ def main() -> None:
         else:
             z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
             print(f"  pyramid-only from {len(z0_present)} existing z0 tiles", flush=True)
-        # Viewer fog as pad: missing children blend into the page, no dark stairs.
-        restyle_levels = _pyramid_from_z0(dest, grid, {0: z0_present}, pad_rgb=VIEW_FOG)
-        overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
+        if not args.polish_gaps:
+            # Viewer fog as pad: missing children blend into the page, no dark stairs.
+            restyle_levels = _pyramid_from_z0(dest, grid, {0: z0_present}, pad_rgb=VIEW_FOG)
+            overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
         args.skip_restyle = True
         args.skip_procedural = True
         # Do not run fill_gaps: that would copy dark procedural edge fog back.
@@ -4846,8 +5286,10 @@ def main() -> None:
     if restyle_levels is not None and (proc_levels is not None or procedural_on_disk):
         manifest["restyle"] = {"dir": args.restyle_dir}
         manifest["levels"] = restyle_levels
-    (args.out / "manifest.json").write_text(json.dumps(manifest) + "\n")
-    print(f"  wrote {args.out / 'manifest.json'} build={manifest['build']}", flush=True)
+    manifest_dir = getattr(args, "_manifest_dir", args.out)
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "manifest.json").write_text(json.dumps(manifest) + "\n")
+    print(f"  wrote {manifest_dir / 'manifest.json'} build={manifest['build']}", flush=True)
 
 
 
