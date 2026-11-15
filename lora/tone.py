@@ -294,3 +294,176 @@ def tone_tile(
     return lab_to_rgb(lab)
 
 
+
+# --- seam steps -----------------------------------------------------------
+#
+# Hard tone steps sit on straight, axis-aligned lines: z0 tile edges (per-tile
+# passes matched each tile on its own) and restyle-window / district edges
+# (a later district pasted over an earlier one). The smooth field above cannot
+# reproduce a step, so it would leave one half-corrected. Instead the map is cut
+# into rectangles by every candidate line, the residual step across each
+# rectangle side is measured at full resolution, and one offset per rectangle
+# is solved so that real (consistent) steps cancel and everything else stays
+# continuous.
+
+TONE_BAND = 16  # px each side of a line
+TONE_GAP = 2  # px skipped at the line itself
+TONE_STEP_CONSIST = (0.8, 2.0)  # |median restyle step| / (row MAD + 1)
+TONE_STEP_MIN = (3.0, 6.0)  # Lab, restyle step
+TONE_STEP_ROWS = 24
+TONE_STEP_REACH = 160.0  # px a cancelled step fades over, each side
+TONE_STEP_RAMP = 48.0  # px a step fades in and out along its line
+TONE_STEP_GATE = 0.5  # below this gate a step is not corrected at all
+TONE_MERGE = 4  # px: candidate lines closer than this collapse
+
+
+def merge_lines(lines: list[int] | np.ndarray, merge: int = TONE_MERGE) -> np.ndarray:
+    out: list[int] = []
+    for x in sorted(int(v) for v in lines):
+        if not out or x - out[-1] >= merge:
+            out.append(x)
+    return np.array(out, np.int64)
+
+
+def band_bounds(lines: np.ndarray, k: int, band: int = TONE_BAND, gap: int = TONE_GAP) -> tuple[int, int] | None:
+    """Usable band width on each side of lines[k] (same width both sides), or None."""
+    left = lines[k] - lines[k - 1] if k > 0 else band * 4
+    right = lines[k + 1] - lines[k] if k + 1 < len(lines) else band * 4
+    b = min(band, left // 2 - gap, right // 2 - gap)
+    if b < 4:
+        return None
+    return gap, gap + b
+
+
+def step_stat(left: np.ndarray, right: np.ndarray, ok: np.ndarray, *, min_rows: int = TONE_STEP_ROWS) -> np.ndarray:
+    """Gated residual step (3,) across a line from per-row band means (n, 6).
+
+    Channels 0-2 are the residual (house original - restyle), 3-5 the restyle.
+    The gate looks at the restyle alone: a step is only corrected where the
+    restyle itself jumps consistently along the line. A step that is only in
+    the original (lossy procedural tiles, a road on a tile edge) is ignored.
+    """
+    n = int(ok.sum())
+    if n < max(min_rows, int(0.3 * len(ok))):
+        return np.zeros(3, np.float32)
+    d = (right - left)[ok]
+    s = np.median(d[:, :3], axis=0)
+    sr = np.median(d[:, 3:6], axis=0)
+    mad = float(np.median(np.linalg.norm(d[:, 3:6] - sr, axis=1)))
+    mag = float(np.linalg.norm(sr))
+    gate = float(smoothstep(np.float32(mag / (mad + 1.0)), *TONE_STEP_CONSIST) * smoothstep(np.float32(mag), *TONE_STEP_MIN))
+    if gate < TONE_STEP_GATE:
+        return np.zeros(3, np.float32)
+    return s.astype(np.float32)
+
+
+def step_field(segments: np.ndarray, x0: float, y0: float, w: int, h: int, scale: float = 1.0,
+               *, reach: float = None, ramp: float = None) -> np.ndarray:
+    """Correction (h, w, 3) that cancels measured seam steps, sampled at
+    x0 + (i + 0.5) * scale, y0 + (j + 0.5) * scale (grid pixels).
+
+    segments: (n, 7) rows of axis (0 = vertical line at x = c, 1 = horizontal
+    at y = c), c, a, b (extent along the line), step (3) = residual on the
+    far side minus the near side. Each side takes half the step at the line,
+    fading to nothing over `reach` px; along the line the segment fades in
+    and out over `ramp` px, so neighbouring segments of one seam hand over
+    smoothly. Nothing is piecewise constant, so flat water gets no terraces.
+    """
+    reach = TONE_STEP_REACH if reach is None else reach
+    ramp = TONE_STEP_RAMP if ramp is None else ramp
+    out = np.zeros((h, w, 3), np.float32)
+    if len(segments) == 0:
+        return out
+    xs = x0 + (np.arange(w, dtype=np.float32) + 0.5) * scale
+    ys = y0 + (np.arange(h, dtype=np.float32) + 0.5) * scale
+    x1, y1 = xs[-1] + scale, ys[-1] + scale
+    for axis, c, a, b, s0, s1, s2 in segments:
+        if axis == 0:
+            if c + reach < x0 or c - reach > x1 or b + ramp < y0 or a - ramp > y1:
+                continue
+            across, along = xs, ys
+        else:
+            if c + reach < y0 or c - reach > y1 or b + ramp < x0 or a - ramp > x1:
+                continue
+            across, along = ys, xs
+        d = across - c
+        f = np.where(d >= 0, 0.5, -0.5) * (1.0 - smoothstep(np.abs(d), 0.0, reach))
+        g = smoothstep(along, a - ramp, a + ramp) * (1.0 - smoothstep(along, b - ramp, b + ramp))
+        ia = np.nonzero(f)[0]
+        ib = np.nonzero(g)[0]
+        if len(ia) == 0 or len(ib) == 0:
+            continue
+        sl_a = slice(ia[0], ia[-1] + 1)
+        sl_b = slice(ib[0], ib[-1] + 1)
+        m = g[sl_b][:, None] * f[sl_a][None, :]  # (along, across)
+        step = np.array([s0, s1, s2], np.float32)
+        if axis == 0:
+            out[sl_b, sl_a] += m[..., None] * step
+        else:
+            out[sl_a, sl_b] += m.T[..., None] * step
+    return out
+
+
+def tile_measure(
+    res: np.ndarray,
+    rest: np.ndarray,
+    valid: np.ndarray,
+    x0: int,
+    y0: int,
+    xl: np.ndarray,
+    yl: np.ndarray,
+) -> dict:
+    """Per-tile statistics for the step solve.
+
+    res: (S, S, 3) residual (house original - restyle), rest: (S, S, 3)
+    restyle Lab, valid: (S, S) bool.
+    xl / yl: global candidate lines, which must include this tile's edges.
+    Returns interior steps and edge bands for the caller to pair with the
+    neighbouring tile.
+    """
+    size = res.shape[0]
+    x1, y1 = x0 + size, y0 + size
+    ix0, ix1 = int(np.searchsorted(xl, x0)), int(np.searchsorted(xl, x1))
+    iy0, iy1 = int(np.searchsorted(yl, y0)), int(np.searchsorted(yl, y1))
+    steps = []
+    both = np.concatenate([res, rest], axis=-1)
+
+    def bands(axis_res: np.ndarray, axis_valid: np.ndarray, lo: int, hi: int):
+        v = axis_valid[:, lo:hi]
+        cnt = v.sum(axis=1)
+        mean = (axis_res[:, lo:hi] * v[..., None]).sum(axis=1) / np.maximum(cnt, 1)[:, None]
+        return mean.astype(np.float32), cnt >= 0.75 * (hi - lo)
+
+    # Interior vertical lines (x), per y segment; then horizontal by transposing.
+    for axis in ("x", "y"):
+        r = both if axis == "x" else both.transpose(1, 0, 2)
+        vv = valid if axis == "x" else valid.T
+        lines, other = (xl, yl) if axis == "x" else (yl, xl)
+        a0, a1 = (x0, x1) if axis == "x" else (y0, y1)
+        b0, b1 = (iy0, iy1) if axis == "x" else (ix0, ix1)
+        ob = y0 if axis == "x" else x0
+        for k in range(int(np.searchsorted(lines, a0)) + 1, int(np.searchsorted(lines, a1))):
+            bb = band_bounds(lines, k)
+            if bb is None:
+                continue
+            g, e = bb
+            c = lines[k] - a0
+            lm, lok = bands(r, vv, c - e, c - g)
+            rm, rok = bands(r, vv, c + g, c + e)
+            for j in range(b0, b1):
+                sa, sb = other[j] - ob, other[j + 1] - ob
+                steps.append((axis, k, j, step_stat(lm[sa:sb], rm[sa:sb], lok[sa:sb] & rok[sa:sb])))
+    # Edge bands for lines on the tile border.
+    edges = {}
+    for axis in ("x", "y"):
+        r = both if axis == "x" else both.transpose(1, 0, 2)
+        vv = valid if axis == "x" else valid.T
+        lines = xl if axis == "x" else yl
+        a0, a1 = (x0, x1) if axis == "x" else (y0, y1)
+        k0, k1 = int(np.searchsorted(lines, a0)), int(np.searchsorted(lines, a1))
+        bb0, bb1 = band_bounds(lines, k0), band_bounds(lines, k1)
+        if bb0 is not None:
+            edges[(axis, "lo")] = bands(r, vv, bb0[0], bb0[1])  # right side of the line at a0
+        if bb1 is not None:
+            edges[(axis, "hi")] = bands(r, vv, size - bb1[1], size - bb1[0])  # left side of the line at a1
+    return {"steps": steps, "edges": edges}
