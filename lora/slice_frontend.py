@@ -3488,6 +3488,152 @@ def polish_mint(
     return present
 
 
+# ---------------------------------------------------------------------------
+# Listed spots (--polish-spots FILE): a few one-off blemishes no general
+# rule catches without hurting elsewhere, listed in a JSON file in global
+# z0 pixels (tile * 512 + offset). Kinds:
+#   {"kind": "fog", "center": [x, y], "radius": [rx, ry]}
+#       fade an ellipse to viewer beige, feathered over its outer half;
+#   {"kind": "water", "box": [x0, y0, x1, y1], "sigma": px}
+#       redraw an isolated water blob inside the box with a smoothed outline
+#       (its water/fog blend, blurred and re-thresholded), so straight
+#       tile-edge cuts and notches round off.
+# Sources are a one-time .spots-src snapshot, so the pass is idempotent.
+# ---------------------------------------------------------------------------
+
+SPOTS_VERSION = "spots-2"
+SPOTS_FEATHER = 0.5
+
+
+def spot_bbox(spot: dict) -> tuple[int, int, int, int]:
+    if spot["kind"] == "fog":
+        (cx, cy), (rx, ry) = spot["center"], spot["radius"]
+        return int(cx - rx), int(cy - ry), int(math.ceil(cx + rx)), int(math.ceil(cy + ry))
+    if spot["kind"] == "water":
+        x0, y0, x1, y1 = spot["box"]
+        return int(x0), int(y0), int(x1), int(y1)
+    raise ValueError(f"unknown spot kind {spot['kind']!r}")
+
+
+def fog_spot(canvas: np.ndarray, origin: tuple[int, int], spot: dict) -> np.ndarray:
+    """Fade an ellipse of `canvas` (global origin x, y) to viewer beige."""
+    (cx, cy), (rx, ry) = spot["center"], spot["radius"]
+    h, w = canvas.shape[:2]
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    d = np.sqrt(((xx + origin[0] - cx) / rx) ** 2 + ((yy + origin[1] - cy) / ry) ** 2)
+    a = 1.0 - smoothstep(d, 1.0 - SPOTS_FEATHER, 1.0)
+    fog = np.array(VIEW_FOG, np.float32)
+    out = canvas.astype(np.float32) * (1.0 - a[:, :, None]) + fog * a[:, :, None]
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
+def water_spot(canvas: np.ndarray, spot: dict) -> np.ndarray:
+    """Redraw the water blob in `canvas` with a smoothed outline."""
+    rgb = canvas.astype(np.float32)
+    fog = np.array(VIEW_FOG, np.float32)
+    deep = is_teal_water(canvas)
+    if not deep.any():
+        return canvas.copy()
+    water = np.median(rgb[deep], axis=0)
+    # per-pixel blend factor between fog (0) and water (1), along fog -> water
+    axis = water - fog
+    a = np.clip(((rgb - fog) @ axis) / float(axis @ axis), 0.0, 1.0)
+    sigma = float(spot.get("sigma", 60))
+    smooth = gaussian_blur_float(a.astype(np.float32), sigma)
+    shape = smoothstep(smooth, 0.2, 0.7)
+    shape = gaussian_blur_float(shape.astype(np.float32), sigma / 2.0)
+    out = fog * (1.0 - shape[:, :, None]) + water * shape[:, :, None]
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
+def load_spots(path: Path) -> list[dict]:
+    spots = json.loads(Path(path).read_text())["spots"]
+    for spot in spots:
+        spot_bbox(spot)  # validates the kind
+    return spots
+
+
+def spots_stamp(spots: list[dict]) -> str:
+    return f"{SPOTS_VERSION} feather={SPOTS_FEATHER} {json.dumps(spots, sort_keys=True)}\n"
+
+
+def polish_spots(dest: Path, grid: dict, spots: list[dict], *, lossless_z0: bool = True) -> set[tuple[int, int]]:
+    """Apply listed spot fixes to z0 (see section notes)."""
+    cols, rows = grid["cols"], grid["rows"]
+    dest0 = dest / "0"
+    snap0 = dest / ".spots-src" / "0"
+    snap0.mkdir(parents=True, exist_ok=True)
+    stamp_path = dest / ".spots-stamp"
+    stamp = spots_stamp(spots)
+    present = present_from_disk(dest, cols, rows)
+    if stamp_path.exists() and stamp_path.read_text() == stamp:
+        print("  spots already applied", flush=True)
+        return present
+    fog_tile = np.broadcast_to(np.array(VIEW_FOG, np.uint8), (TILE, TILE, 3))
+
+    tiles: set[tuple[int, int]] = set()
+    for spot in spots:
+        x0, y0, x1, y1 = spot_bbox(spot)
+        for ty in range(max(0, y0 // TILE), min(rows - 1, y1 // TILE) + 1):
+            for tx in range(max(0, x0 // TILE), min(cols - 1, x1 // TILE) + 1):
+                tiles.add((tx, ty))
+    # 1. start every touched tile from its snapshot (or snapshot it now)
+    work: dict[tuple[int, int], np.ndarray] = {}
+    for tx, ty in sorted(tiles):
+        snap, cur = snap0 / f"{tx}_{ty}.webp", dest0 / f"{tx}_{ty}.webp"
+        if not snap.exists() and cur.exists():
+            shutil.copy2(cur, snap)
+        if snap.exists():
+            with Image.open(snap) as im:
+                work[(tx, ty)] = np.asarray(im.convert("RGB")).copy()
+        else:
+            work[(tx, ty)] = fog_tile.copy()
+    # 2. apply spots in order on a canvas over their tiles
+    for spot in spots:
+        x0, y0, x1, y1 = spot_bbox(spot)
+        tx0, ty0 = max(0, x0 // TILE), max(0, y0 // TILE)
+        tx1, ty1 = min(cols - 1, x1 // TILE), min(rows - 1, y1 // TILE)
+        canvas = np.concatenate(
+            [np.concatenate([work[(tx, ty)] for tx in range(tx0, tx1 + 1)], axis=1) for ty in range(ty0, ty1 + 1)],
+            axis=0,
+        )
+        ox, oy = tx0 * TILE, ty0 * TILE
+        cx0, cy0 = max(0, x0 - ox), max(0, y0 - oy)
+        cx1, cy1 = min(canvas.shape[1], x1 - ox), min(canvas.shape[0], y1 - oy)
+        crop = canvas[cy0:cy1, cx0:cx1]
+        if spot["kind"] == "fog":
+            crop = fog_spot(crop, (ox + cx0, oy + cy0), spot)
+        else:
+            crop = water_spot(crop, spot)
+        canvas[cy0:cy1, cx0:cx1] = crop
+        for ty in range(ty0, ty1 + 1):
+            for tx in range(tx0, tx1 + 1):
+                y, x = (ty - ty0) * TILE, (tx - tx0) * TILE
+                work[(tx, ty)] = canvas[y : y + TILE, x : x + TILE].copy()
+    # 3. write back; all-beige tiles are removed (the viewer shows beige)
+    changed = removed = 0
+    for (tx, ty), out in sorted(work.items()):
+        path = dest0 / f"{tx}_{ty}.webp"
+        if float(np.abs(out.astype(np.int16) - np.array(VIEW_FOG)).max()) <= 3:
+            if path.exists():
+                path.unlink()
+                removed += 1
+            present.discard((tx, ty))
+            continue
+        if path.exists():
+            with Image.open(path) as im:
+                cur = np.asarray(im.convert("RGB"))
+            if int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+                present.add((tx, ty))
+                continue
+        _atomic_save_webp(Image.fromarray(out, "RGB"), path, lossless=lossless_z0)
+        present.add((tx, ty))
+        changed += 1
+    stamp_path.write_text(stamp)
+    print(f"  spots done: {len(spots)} spots, {len(tiles)} tiles, changed={changed} removed={removed}", flush=True)
+    return present
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
@@ -3597,6 +3743,13 @@ def main() -> None:
         help="after --polish-fogline: turn teal procedural-staging greens near the edge toward the restyled forest hue (free, idempotent)",
     )
     ap.add_argument(
+        "--polish-spots",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="apply listed one-off fixes (fog ellipses, water blob reshapes) from a spots file such as lora/spots/tinysz-core.json (free, idempotent)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
         default=None,
@@ -3689,7 +3842,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -3715,10 +3868,14 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
-        elif args.polish_mint:
-            fade = args.fade if args.fade is not None else VIGNETTE_FADE
-            print(f"  mint rims → {dest}", flush=True)
-            z0_present = polish_mint(dest, grid, fade=fade)
+        elif args.polish_mint or args.polish_spots:
+            if args.polish_mint:
+                fade = args.fade if args.fade is not None else VIGNETTE_FADE
+                print(f"  mint rims → {dest}", flush=True)
+                z0_present = polish_mint(dest, grid, fade=fade)
+            if args.polish_spots:
+                print(f"  spots from {args.polish_spots} → {dest}", flush=True)
+                z0_present = polish_spots(dest, grid, load_spots(args.polish_spots))
         elif args.polish_fogline:
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  fog boundary cleanup → {dest}", flush=True)
