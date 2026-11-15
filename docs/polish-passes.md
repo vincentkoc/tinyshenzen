@@ -110,6 +110,8 @@ evens colour and cannot redraw any of these. `--polish-gaps` runs last:
    is nudged toward the surrounding restyle with a robust 96-px low-pass and
    blended in with a soft mask. Water and the original's fog dither are never
    refilled from the original.
+4. Each filled region is scored again. A fill that does not lower its gap
+   score is dropped and the restyle is kept (`"source": "kept"` in the report).
 
 ```bash
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-gaps \
