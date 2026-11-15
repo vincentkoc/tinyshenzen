@@ -19,6 +19,7 @@ Higher zoom levels are rebuilt after every pass.
 | 3 | `--polish-fogline` | Near the edge, pixels whose surroundings are mostly fog (dashed traces, gray-washed windows, straight cut-offs) fade to beige along a feathered ramp. |
 | 4 | `--polish-mint --polish-spots FILE` | Mint: teal procedural-staging rims near the edge turn toward the restyled forest hue; real water and glass are left alone. Spots: one-off fixes listed in a JSON file, including milky river veils. |
 | 5 | `--polish-seams` | Feathers a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are still on disk. Only the low-frequency colour is moved, and only where both sides are the same kind of surface, so a building cut or a river bank is not smeared. |
+| 6 | `--polish-tone` | Gives the whole restyle one house tone. Replaces step 5: it reads the tiles from before the seam blend. See [House tone](#house-tone). |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
 windows, `--polish-water` needs them for the district water masks, and
@@ -41,6 +42,7 @@ tile directory (`tiles-restyled/` by default):
 | mint | `.mint-src/` |
 | spots | `.spots-src/` |
 | seams | `.seams-src/` |
+| tone | `.tone-src/` (seeded once from `.seams-src/`, else from z0) |
 
 Snapshots are taken the first time a pass touches a tile and reused after
 that. Tuning a pass and re-running it starts from the same source. The
@@ -48,6 +50,35 @@ seams snapshot is the exception: it is refreshed whenever the seams stamp
 changes (for example after a spots re-run), so it always starts from the
 current tiles. If you reslice the map (`--tilewise` again), delete these
 directories so the passes snapshot the new tiles.
+
+## House tone
+
+The restyle was painted in overlapping windows, and each window came back with
+its own palette: a pale lime pond field next to a dark teal one, whole 512-px
+squares a shade lighter. Feathering 16 px across an edge (`--polish-seams`)
+does nothing for that. `--polish-tone` uses the procedural tiles (`tiles/`,
+the render the restyle was made from), which have one consistent tone:
+
+1. Fit one colour transform from the original to the restyle in CIE Lab over
+   the whole city (a robust cubic plus a residual lookup table). That is the
+   house style.
+2. Find hard tone steps. They sit on z0 tile edges and on district and
+   restyle-window edges. On each of those lines the residual (house-styled
+   original minus restyle) is compared in 16-px bands on both sides, segment by
+   segment. A step is cancelled only where the restyle itself jumps
+   consistently along the line. Each side takes half the step, fading out over
+   160 px, so there are no terraces in flat water.
+3. Low-pass what is left with a robust Gaussian (sigma 96 px) on one global
+   cell grid, and add it to every restyle pixel. Only low frequencies move, so
+   the restyle's detail stays. A patch where the restyle drew different content
+   (a tower on a field) gets a low weight and does not tint its surroundings.
+4. Refill washed-out patches, where the restyle returned flat beige over
+   buildings, from the house-styled original.
+
+The viewer-fog vignette is left alone. Use `--tone-region TX0,TY0,TX1,TY1`
+with `--tone-out DIR` to preview a few tiles without touching the map. After a
+reslice, or after re-running an earlier pass, delete `.tone-src/` so it is
+seeded again.
 
 ## Spots file
 
