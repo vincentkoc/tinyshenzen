@@ -1,17 +1,31 @@
+<div align="center">
+
 # Tiny Shenzhen
 
-[![Sponsor](https://img.shields.io/badge/sponsor-vincentkoc-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vincentkoc)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+**An isometric pixel-art map of Shenzhen you can pan and zoom, from Shekou to Luohu Port.**
 
-An isometric pixel-art map of Shenzhen you can pan and zoom, from Shekou to Luohu Port.
-It is built from open data and drawn in a fine, naturalistic miniature style inspired by
-maps such as Pixel Singapore.
+Built from open data. Drawn in a fine miniature style inspired by Pixel Singapore.
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Sponsor](https://img.shields.io/badge/sponsor-vincentkoc-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vincentkoc)
+[![GitHub stars](https://img.shields.io/github/stars/vincentkoc/tinyshenzen?style=flat&logo=github)](https://github.com/vincentkoc/tinyshenzen/stargazers)
+![Node 22+](https://img.shields.io/badge/node-22%2B-339933?logo=nodedotjs&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?logo=python&logoColor=white)
+
+[Features](#features) · [Quick start](#quick-start) · [Pipeline](#pipeline) · [Credits](#credits)
+
+</div>
+
+<br>
 
 ![Tiny Shenzhen in the viewer: Houhai, China Resources Headquarters, the Shenzhen Bay Sports Center and Shenzhen Bay Park](docs/images/tinyshenzen-core.webp)
 
-Tiny Shenzhen is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds) (MIT,
-© 2026 Nihey Takizawa). It uses the same pipeline and viewer, with a Shenzhen city
-definition and a Shenzhen style. Nothing is drawn by hand.
+<br>
+
+Tiny Shenzhen is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds). It keeps the
+same pipeline and viewer, and adds a Shenzhen city definition and style. Nothing is drawn by hand.
 
 ## Features
 
