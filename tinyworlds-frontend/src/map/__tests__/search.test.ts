@@ -319,3 +319,52 @@ describe("Valencia's own shorthand", () => {
     expect(found("oceanografico")).toEqual(["L'Oceanogràfic"]);
   });
 });
+
+describe("Chinese names", () => {
+  const zh = createSearchIndex([
+    p("平安金融中心", "landmark", 94, "Futian"),
+    p("Ping An Finance Centre", "landmark", 98, "Futian"),
+    p("莲花山公园", "park", 86, "Futian"),
+    p("福田区图书馆 Futian Library", "museum", 40, "景华社区"),
+    p("深圳灣公路大橋 Shenzhen Bay Bridge", "bridge", 60),
+    p("深圳湾公园", "park", 70, "Nanshan"),
+    p("华强北", "hood", 80, "Futian"),
+    p("罗湖口岸", "place", 90, "Luohu"),
+  ]);
+  const zhNames = (q: string) => zh.search(q).map((h) => h.place.n);
+
+  it("keeps Han characters, folds traditional to simplified and full-width to plain", () => {
+    expect(normalize("深圳湾")).toBe("深圳湾");
+    expect(normalize("深圳灣公路大橋")).toBe("深圳湾公路大桥");
+    expect(normalize("羅湖")).toBe("罗湖");
+    expect(normalize("ＫＫ１００")).toBe("kk100");
+    expect(normalize("福田区图书馆 Futian Library")).toBe("福田区图书馆 futian library");
+  });
+
+  it("finds a Chinese name by its start, whole or in part", () => {
+    expect(zhNames("平安金融中心")[0]).toBe("平安金融中心");
+    expect(zhNames("平安")[0]).toBe("平安金融中心");
+    expect(zhNames("华强北")).toEqual(["华强北"]);
+    expect(zhNames("福田")).toContain("福田区图书馆 Futian Library");
+  });
+
+  it("finds a Chinese name by a piece inside it, down to one character", () => {
+    expect(zhNames("公园")).toEqual(["莲花山公园", "深圳湾公园"]);
+    expect(zhNames("口岸")).toEqual(["罗湖口岸"]);
+    expect(zhNames("园")).toContain("莲花山公园");
+  });
+
+  it("matches simplified queries to traditional names and back", () => {
+    expect(zhNames("深圳湾")).toEqual(["深圳湾公园", "深圳灣公路大橋 Shenzhen Bay Bridge"]);
+    expect(zhNames("羅湖")).toEqual(["罗湖口岸"]);
+  });
+
+  it("does not typo-match Han characters", () => {
+    expect(zhNames("莲花海")).toEqual([]);
+  });
+
+  it("still finds the English half of a bilingual name", () => {
+    expect(zhNames("Shenzhen Bay")).toEqual(["深圳灣公路大橋 Shenzhen Bay Bridge"]);
+    expect(zhNames("library")).toEqual(["福田区图书馆 Futian Library"]);
+  });
+});

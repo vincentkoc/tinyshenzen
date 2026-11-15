@@ -1,4 +1,5 @@
 import { WORLD } from "@/worlds";
+import { hasHan, toSimplified } from "./cjk";
 import type { Place } from "./manifest";
 import type { SearchRules } from "./search-rules";
 
@@ -27,21 +28,30 @@ export interface SearchIndex {
 /** Matches nothing: for languages that do not write "d'" or "l'" onto the next word. */
 const NO_ELISION = /(?!)/g;
 
-/** Lowercase, unaccented, punctuation-free; ordinals and number words become digits. */
+/**
+ * Lowercase, unaccented, punctuation-free; ordinals and number words become digits. Letters in
+ * any script survive (深圳湾 stays 深圳湾), full-width forms become plain ones, and traditional
+ * Chinese folds to simplified so 深圳灣 and 深圳湾 meet.
+ */
 export function normalize(text: string, rules: SearchRules = WORLD.search): string {
-  return text
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/&/g, ` ${rules.and} `)
-    .replace(rules.elision ?? NO_ELISION, "$1 ")
-    .replace(/['’.]/g, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(" ")
-    .filter(Boolean)
-    .map((w) => rules.numberWords[w] ?? (rules.ordinal ? w.replace(rules.ordinal, "$1") : w))
-    .join(" ");
+  return (
+    toSimplified(text)
+      .replace(/[\uff01-\uff5e]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      // ordinal indicators read as a break, as they did when only a-z counted: "1º de Mayo"
+      .replace(/[ºª]/g, " ")
+      .toLowerCase()
+      .replace(/&/g, ` ${rules.and} `)
+      .replace(rules.elision ?? NO_ELISION, "$1 ")
+      .replace(/['’.]/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .split(" ")
+      .filter(Boolean)
+      .map((w) => rules.numberWords[w] ?? (rules.ordinal ? w.replace(rules.ordinal, "$1") : w))
+      .join(" ")
+  );
 }
 
 /** Edit distance (insert, delete, substitute, swap neighbours), abandoned once it passes `max`. */
@@ -69,10 +79,17 @@ function editDistance(a: string, b: string, max: number): number {
 
 const typosAllowed = (len: number): number => (len >= 8 ? 2 : len >= 4 ? 1 : 0);
 
-/** How well one query word matches one word: 3 starts it, 2 is inside it, 1 with a typo, 0 not. */
+/**
+ * How well one query word matches one word: 3 starts it, 2 is inside it, 1 with a typo, 0 not.
+ * Chinese has no spaces, so 福田区图书馆 is one "word": one Han character is enough to look
+ * inside it (园 finds 莲花山公园), and Han is never typo-matched, since a different character
+ * is a different place.
+ */
 function wordMatch(token: string, word: string): 0 | 1 | 2 | 3 {
   if (word.startsWith(token)) return 3;
-  if (token.length >= 2 && word.includes(token)) return 2;
+  const han = hasHan(token);
+  if ((token.length >= 2 || han) && word.includes(token)) return 2;
+  if (han) return 0;
   const max = typosAllowed(token.length);
   if (max > 0) {
     // compare with the start of the word, so "brodway" finds "broadway" and "willamsb" finds "williamsburg"
