@@ -237,10 +237,16 @@ export function MapApp() {
   // settings → engine
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
+  // the constructor already points at the current restyle setting; only swap when it changes
+  const restyleFor = useRef<MapEngine | null>(null);
   useEffect(() => {
     if (!engine || !session) return;
     const dir =
       prefs.restyle && session.manifest.restyle?.dir ? session.manifest.restyle.dir : "tiles";
+    if (restyleFor.current !== engine) {
+      restyleFor.current = engine;
+      return;
+    }
     engine.setTileUrl((z, tx, ty) =>
       dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, session.manifest.build),
     );

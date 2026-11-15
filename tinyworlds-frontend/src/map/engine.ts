@@ -23,7 +23,7 @@ import {
   type Sight,
   type SightShape,
 } from "./sights";
-import { levelForScale, Pyramid, tileKey } from "./tiles";
+import { levelForScale, pinLevels, planTiles, Pyramid, tileKey, type TileRequest } from "./tiles";
 
 /**
  * The map engine: a plain class that owns two canvases and the view. React never
@@ -109,12 +109,7 @@ interface Tile {
   pinned: boolean;
 }
 
-interface Wanted {
-  z: number;
-  tx: number;
-  ty: number;
-  dist: number;
-}
+type Wanted = TileRequest;
 
 const MAX_LOADS = 6;
 const FADE_MS = 180;
@@ -167,7 +162,7 @@ export class MapEngine {
     bottom: 1,
   };
   private minScale = 0.01;
-  /** how many decoded tiles to keep (each is 1 MB at 512 px): a few screens' worth */
+  /** how many decoded tiles to keep (each is 1 MB at 512 px): the view, a ring, and parents */
   private maxTiles = 120;
   private reducedMotion: boolean;
   private destroyed = false;
@@ -543,6 +538,7 @@ export class MapEngine {
     this.tiles.clear();
     this.inflight = 0;
     this.tries.clear();
+    this.preloadBase();
     this.invalidate();
   }
 
@@ -584,9 +580,20 @@ export class MapEngine {
     }
     const fit = this.getFitScale();
     this.minScale = Math.min(fit * 0.6, this.manifest.maxScale, 1);
-    const t = this.manifest.tileSize;
-    const onScreen = (Math.ceil((width * dpr) / t) + 1) * (Math.ceil((height * dpr) / t) + 1);
-    this.maxTiles = clamp(Math.round(onScreen * 2.5), 48, 200);
+    this.refreshBudget();
+  }
+
+  /**
+   * Room for the tiles on screen, one ring around them, and the coarser parents that
+   * stand in while a pan or zoom loads. Sized in map space so a zoomed-out view is not shorted.
+   */
+  private refreshBudget(): void {
+    const v = this.view;
+    const z = levelForScale(v.scale * Math.min(v.dpr, 2), this.pyramid.maxZ);
+    const span = this.pyramid.span(z);
+    const cols = Math.ceil(v.width / Math.max(v.scale, 1e-6) / span) + 3;
+    const rows = Math.ceil(v.height / Math.max(v.scale, 1e-6) / span) + 3;
+    this.maxTiles = clamp(cols * rows * 3, 64, 320);
   }
 
   /** Keeps the view on the map and refreshes the visible rectangle. */
@@ -602,6 +609,7 @@ export class MapEngine {
     v.right = v.x + hw;
     v.top = v.y - hh;
     v.bottom = v.y + hh;
+    this.refreshBudget();
   }
 
   private zoomAbout(ax: number, ay: number, scale: number, mx?: number, my?: number): void {
@@ -737,14 +745,36 @@ export class MapEngine {
     ctx.imageSmoothingEnabled = v.scale < 1;
     ctx.imageSmoothingQuality = "medium";
 
+    // failed a while ago: forget the tile so it can be asked for again
+    for (const [key, tile] of this.tiles) {
+      if (tile.state === "error" && now >= tile.retryAt) this.tiles.delete(key);
+    }
+
+    const plan = planTiles(
+      pyramid,
+      v,
+      (key) => this.tiles.has(key),
+      (key) => {
+        const tile = this.tiles.get(key);
+        return tile?.state === "ready" && !!tile.bitmap;
+      },
+    );
+    for (const r of plan.retain) {
+      const tile = this.tiles.get(tileKey(r.z, r.tx, r.ty));
+      if (!tile) continue;
+      tile.usedFrame = this.frameNo;
+      tile.wantedAt = now;
+    }
+    this.wanted.length = 0;
+    this.wanted.push(...plan.wanted);
+
     // on a dense screen the next finer level still has a pixel to show for every pixel it holds
-    const z = levelForScale(v.scale * Math.min(v.dpr, 2), pyramid.maxZ);
-    const range = pyramid.range(z, v);
+    const z = plan.z;
+    const range = plan.range;
     const devX = (mx: number) => Math.round((mx - v.left) * s);
     const devY = (my: number) => Math.round((my - v.top) * s);
     const span = pyramid.span(z);
     let fading = false;
-    this.wanted.length = 0;
 
     for (let ty = range.ty0; ty <= range.ty1; ty++) {
       for (let tx = range.tx0; tx <= range.tx1; tx++) {
@@ -759,11 +789,7 @@ export class MapEngine {
         if (dw <= 0 || dh <= 0) continue;
 
         const key = tileKey(z, tx, ty);
-        let tile = this.tiles.get(key);
-        if (tile?.state === "error" && now >= tile.retryAt) {
-          this.tiles.delete(key); // failed a while ago: ask again
-          tile = undefined;
-        }
+        const tile = this.tiles.get(key);
         let alpha = 0;
         if (tile) {
           tile.usedFrame = this.frameNo;
@@ -771,13 +797,6 @@ export class MapEngine {
           if (tile.state === "ready") {
             alpha = this.reducedMotion ? 1 : clamp((now - tile.readyAt) / FADE_MS, 0, 1);
           }
-        } else {
-          this.wanted.push({
-            z,
-            tx,
-            ty,
-            dist: Math.hypot(left + span / 2 - v.x, top + span / 2 - v.y),
-          });
         }
 
         if (alpha < 1) {
@@ -849,12 +868,12 @@ export class MapEngine {
     }
   }
 
-  /** The coarsest level is small: keep all of it, so there is always something to show. */
+  /** Coarse overview tiles are small: pin them, so a pan always has something to show. */
   private preloadBase(): void {
-    const z = this.pyramid.maxZ;
-    const base = this.pyramid.all(z);
-    if (base.length > 40) return;
-    for (const { tx, ty } of base) this.load(z, tx, ty, performance.now(), true);
+    const now = performance.now();
+    for (const z of pinLevels(this.pyramid)) {
+      for (const { tx, ty } of this.pyramid.all(z)) this.load(z, tx, ty, now, true);
+    }
   }
 
   /** Starts the nearest downloads, and cancels the ones the view has moved away from. */
@@ -867,7 +886,7 @@ export class MapEngine {
       }
     }
     if (this.wanted.length === 0) return;
-    this.wanted.sort((a, b) => a.dist - b.dist);
+    this.wanted.sort((a, b) => a.pri - b.pri || a.dist - b.dist);
     for (const w of this.wanted) {
       if (this.inflight >= MAX_LOADS) break;
       this.load(w.z, w.tx, w.ty, now, false);
