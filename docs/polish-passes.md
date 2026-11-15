@@ -17,12 +17,16 @@ Higher zoom levels are rebuilt after every pass.
 | 1 | `--polish-vignette` | Rebuilds the edge band from the source windows and fades it to the viewer's beige with one smooth, slightly wobbled vignette. No square steps along tile edges. |
 | 2 | `--polish-water --polish-forest --polish-flats` | Water: one bay tone with its wave texture kept, fog holes over open water filled, and a separate fade along the water body. Forest: gray-washed land just inside the edge cross-fades to the clean staging, and restyle-window greens are evened. Flats: featureless ground near the edge (flat fill, gray puddles, white lots) fades into the fog. |
 | 3 | `--polish-fogline` | Near the edge, pixels whose surroundings are mostly fog (dashed traces, gray-washed windows, straight cut-offs) fade to beige along a feathered ramp. |
-| 4 | `--polish-mint --polish-spots FILE` | Mint: teal procedural-staging rims near the edge turn toward the restyled forest hue; real water and glass are left alone. Spots: one-off fixes listed in a JSON file. |
+| 4 | `--polish-mint --polish-spots FILE` | Mint: teal procedural-staging rims near the edge turn toward the restyled forest hue; real water and glass are left alone. Spots: one-off fixes listed in a JSON file, including milky river veils. |
+| 5 | `--polish-seams` | Feathers a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are still on disk. Only the low-frequency colour is moved, and only where both sides are the same kind of surface, so a building cut or a river bank is not smeared. |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
-windows, and `--polish-water` needs them for the district water masks. Passing
-the full `CORE` array every time covers both. Run one step per command, in
-order, and pass the step-2 flags together.
+windows, `--polish-water` needs them for the district water masks, and
+`--polish-seams` uses them to locate restyle-window hems. Passing the full
+`CORE` array every time covers all three. Run one step per command, in
+order, and pass the step-2 flags together. Step 5 can share a command with
+step 4 (`--polish-mint --polish-spots FILE --polish-seams`); spots run
+first, then the seam blend.
 
 ## Sources and re-runs
 
@@ -36,11 +40,14 @@ tile directory (`tiles-restyled/` by default):
 | fogline | `.fogline-src/` |
 | mint | `.mint-src/` |
 | spots | `.spots-src/` |
+| seams | `.seams-src/` |
 
 Snapshots are taken the first time a pass touches a tile and reused after
-that. Tuning a pass and re-running it starts from the same source. If you
-reslice the map (`--tilewise` again), delete these directories so the passes
-snapshot the new tiles.
+that. Tuning a pass and re-running it starts from the same source. The
+seams snapshot is the exception: it is refreshed whenever the seams stamp
+changes (for example after a spots re-run), so it always starts from the
+current tiles. If you reslice the map (`--tilewise` again), delete these
+directories so the passes snapshot the new tiles.
 
 ## Spots file
 
@@ -62,6 +69,8 @@ grid (`tile * 512 + offset`). The live map's list is
   feathered over its outer half.
 - `water`: redraws an isolated water blob inside `box` with an outline smoothed
   by `sigma` pixels, so straight tile-edge cuts round off.
+- `veil`: pulls a milky wash on water inside `box` back toward the deep-water
+  tone, keeping wave texture. Land, sand and buildings are left alone.
 - `where` is a note for people and is ignored.
 
 ## Other flags

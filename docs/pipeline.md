@@ -117,6 +117,7 @@ python3 lora/slice_frontend.py "${CORE[@]}" --polish-vignette
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-water --polish-forest --polish-flats
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-fogline
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-mint --polish-spots lora/spots/tinysz-core.json
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-seams
 ```
 
 Finally, index the world so search and the restyle field stay on the manifest,
