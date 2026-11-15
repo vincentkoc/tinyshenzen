@@ -46,6 +46,8 @@ export type StatuePiece = {
  */
 export interface Curated {
   n: string;
+  /** the English name beside a Chinese `n` */
+  e?: string;
   t: "landmark" | "park" | "bridge" | "museum" | "station" | "place";
   lon: number;
   lat: number;

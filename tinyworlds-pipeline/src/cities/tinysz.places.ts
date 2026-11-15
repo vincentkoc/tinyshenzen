@@ -17,6 +17,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "深圳市民中心",
+    e: "Shenzhen Civic Center",
     t: "place",
     lon: 114.0683,
     lat: 22.5455,
@@ -36,6 +37,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "平安金融中心",
+    e: "Ping An Finance Centre",
     t: "landmark",
     lon: 114.050446,
     lat: 22.536399,
@@ -55,6 +57,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "莲花山公园",
+    e: "Lianhuashan Park",
     t: "park",
     lon: 114.0595,
     lat: 22.5538,
@@ -104,6 +107,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "京基100",
+    e: "KK100",
     t: "landmark",
     lon: 114.10194,
     lat: 22.54667,
@@ -134,6 +138,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "世界之窗",
+    e: "Window of the World",
     t: "place",
     lon: 113.9697556,
     lat: 22.5375139,
@@ -152,6 +157,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "深圳湾公园",
+    e: "Shenzhen Bay Park",
     t: "park",
     lon: 113.994,
     lat: 22.5095,
@@ -181,6 +187,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "深圳海上世界",
+    e: "Shekou Sea World",
     t: "place",
     lon: 113.916,
     lat: 22.485,
@@ -199,6 +206,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "深圳高新技术产业园",
+    e: "Shenzhen Hi-Tech Park",
     t: "place",
     lon: 113.951,
     lat: 22.543,
@@ -217,6 +225,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "后海",
+    e: "Houhai",
     t: "place",
     lon: 113.94167,
     lat: 22.51694,
@@ -235,6 +244,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "东门步行街",
+    e: "Dongmen Pedestrian Street",
     t: "place",
     lon: 114.118,
     lat: 22.548,
@@ -253,6 +263,7 @@ export const CURATED: Curated[] = [
   },
   {
     n: "罗湖口岸",
+    e: "Luohu Port",
     t: "place",
     lon: 114.118,
     lat: 22.532,
