@@ -3328,6 +3328,166 @@ def polish_fogline(
     return present
 
 
+# ---------------------------------------------------------------------------
+# Mint rims (--polish-mint): some forest along the edge is unrestyled
+# procedural staging, whose ground dither and trees are teal (hue ~160)
+# where the restyled forest is green (hue ~95), so it reads as mint
+# patches against the forest. Near the edge, teal-hued pixels are rotated
+# about the gray axis toward the forest hue, keeping lightness. Large teal
+# areas (real water) and blue hues (glass, pools) are left alone. Sources
+# are a one-time .mint-src snapshot, so the pass is idempotent.
+# ---------------------------------------------------------------------------
+
+MINT_HUE_LO = (128.0, 140.0)    # ramp in: teal starts
+MINT_HUE_HI = (172.0, 184.0)    # ramp out: blue glass and pools
+MINT_TARGET_HUE = 95.0
+MINT_MIN_CHROMA = (4.0, 10.0)
+MINT_CHROMA_SCALE = 0.85
+MINT_WATER_SIGMA = 24.0         # px: water is a large teal area, trees are small
+MINT_WATER_LO = 0.25
+MINT_WATER_HI = 0.5
+MINT_WATER_MAX_LUM = 95.0      # sea and rivers are darker than the teal haze
+MINT_WATER_MAX_STD = 6.0       # and flat, unlike clumps of teal trees
+MINT_VERSION = "mint-3"
+
+
+def rgb_hue(rgb: np.ndarray) -> np.ndarray:
+    """Hue in degrees (0..360) from the opponent axes, like HSV hue."""
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    return np.degrees(np.arctan2(np.sqrt(3.0) * (g - b), 2.0 * r - g - b)) % 360.0
+
+
+def rotate_hue(rgb: np.ndarray, degrees: np.ndarray, chroma_scale: np.ndarray | float = 1.0) -> np.ndarray:
+    """Rotate colours about the gray axis by `degrees` (per pixel), scaling chroma."""
+    mean = rgb.mean(axis=-1, keepdims=True)
+    d = rgb - mean
+    t = np.radians(degrees)[..., None]
+    k = np.ones(3, np.float32) / np.sqrt(3.0)
+    cross = np.cross(np.broadcast_to(k, d.shape), d)
+    rot = d * np.cos(t) + cross * np.sin(t)  # d is orthogonal to k
+    scale = np.asarray(chroma_scale, np.float32)
+    return mean + rot * (scale[..., None] if scale.ndim else scale)
+
+
+def flat_teal_water(arr: np.ndarray, k: int = 4) -> np.ndarray:
+    """Dark teal with little texture: sea and rivers, not clumps of teal trees."""
+    h, w = arr.shape[:2]
+    rgb = arr[: h - h % k, : w - w % k, :3].astype(np.float32)
+    small = rgb.reshape(h // k, k, w // k, k, 3).mean(axis=(1, 3))
+    m = is_teal_water(np.round(small).astype(np.uint8), max_lum=MINT_WATER_MAX_LUM)
+    m &= _block_std(small, 4) < MINT_WATER_MAX_STD
+    out = np.zeros((h, w), dtype=bool)
+    out[: h - h % k, : w - w % k] = np.repeat(np.repeat(m, k, axis=0), k, axis=1)
+    return out
+
+
+def mint_weight(arr: np.ndarray) -> np.ndarray:
+    """0..1 weight of teal-hued, non-water pixels to turn forest green."""
+    rgb = arr[:, :, :3].astype(np.float32)
+    hue = rgb_hue(rgb)
+    chroma = rgb.max(axis=2) - rgb.min(axis=2)
+    w = smoothstep(hue, *MINT_HUE_LO) * (1.0 - smoothstep(hue, *MINT_HUE_HI))
+    w = w * smoothstep(chroma, *MINT_MIN_CHROMA)
+    water = gaussian_blur_float(flat_teal_water(arr).astype(np.float32), MINT_WATER_SIGMA)
+    w = w * (1.0 - smoothstep(water, MINT_WATER_LO, MINT_WATER_HI))
+    return w.astype(np.float32)
+
+
+def demint(arr: np.ndarray, strength: np.ndarray | float = 1.0) -> np.ndarray:
+    """Turn teal staging greens toward the restyled forest hue."""
+    rgb = arr[:, :, :3].astype(np.float32)
+    w = mint_weight(arr) * np.asarray(strength, np.float32)
+    if float(w.max()) <= 0.01:
+        return arr[:, :, :3].copy()
+    hue = rgb_hue(rgb)
+    delta = ((MINT_TARGET_HUE - hue + 180.0) % 360.0 - 180.0) * w
+    out = rotate_hue(rgb, delta, 1.0 - (1.0 - MINT_CHROMA_SCALE) * w)
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
+def mint_stamp() -> str:
+    return (
+        f"{MINT_VERSION} hue={MINT_HUE_LO},{MINT_HUE_HI}->{MINT_TARGET_HUE} chroma={MINT_MIN_CHROMA}x{MINT_CHROMA_SCALE} "
+        f"water={MINT_WATER_SIGMA},{MINT_WATER_MAX_LUM},{MINT_WATER_MAX_STD},{MINT_WATER_LO}-{MINT_WATER_HI}\n"
+    )
+
+
+def polish_mint(
+    dest: Path,
+    grid: dict,
+    *,
+    field: np.ndarray | None = None,
+    fade: int = VIGNETTE_FADE,
+    inset: int = VIGNETTE_INSET,
+    scale: int = VIGNETTE_SCALE,
+    lossless_z0: bool = True,
+    tile_filter=None,
+) -> set[tuple[int, int]]:
+    """Turn teal staging rims near the edge forest green (see section notes)."""
+    cols, rows = grid["cols"], grid["rows"]
+    dest0 = dest / "0"
+    snap0 = dest / ".mint-src" / "0"
+    snap0.mkdir(parents=True, exist_ok=True)
+    if field is None:
+        dist_path = dest / ".vignette-dist.npz"
+        if not dist_path.exists():
+            raise SystemExit("--polish-mint needs the vignette field; run --polish-vignette first")
+        field = np.load(dist_path)["field"]
+    present = present_from_disk(dest, cols, rows)
+    vig_band, exterior = edge_band_from_field(field, grid, fade=fade, inset=inset, scale=scale)
+    prox = edge_proximity(grid, vig_band | exterior)
+    f8 = TILE // FOREST_TONE_SCALE
+    stamp_path = dest / ".mint-stamp"
+    progress_path = dest / ".mint-progress.jsonl"
+    stamp = mint_stamp()
+    if stamp_path.exists() and stamp_path.read_text() != stamp:
+        print("  mint parameters changed, redoing the pass", flush=True)
+        progress_path.unlink(missing_ok=True)
+    stamp_path.write_text(stamp)
+    todo = []
+    for ty in range(rows):
+        for tx in range(cols):
+            if (tx, ty) in exterior or (tx, ty) not in present:
+                continue
+            if float(prox[ty * f8 : (ty + 1) * f8, tx * f8 : (tx + 1) * f8].max()) > 0.01:
+                todo.append((tx, ty))
+    if tile_filter is not None:
+        todo = [t for t in todo if tile_filter(*t)]
+    done = _load_progress(progress_path)
+    print(f"  mint todo {len(todo)} tiles", flush=True)
+    changed = 0
+    t0 = time.time()
+    prog = open(progress_path, "a")
+    try:
+        for i, (tx, ty) in enumerate(todo, 1):
+            if (tx, ty) in done:
+                continue
+            dest_path = dest0 / f"{tx}_{ty}.webp"
+            snap_path = snap0 / f"{tx}_{ty}.webp"
+            src = snap_path if snap_path.exists() else dest_path
+            with Image.open(src) as im:
+                arr = np.asarray(im.convert("RGB"))
+            strength = np.clip(upsample_distance(prox, tx, ty, scale=FOREST_TONE_SCALE), 0.0, 1.0)
+            out = demint(arr, strength)
+            if not snap_path.exists():
+                shutil.copy2(dest_path, snap_path)
+            with Image.open(dest_path) as im:
+                cur = np.asarray(im.convert("RGB"))
+            if int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) > 1:
+                _atomic_save_webp(Image.fromarray(out, "RGB"), dest_path, lossless=lossless_z0)
+                changed += 1
+            prog.write(f"{tx},{ty}\n")
+            if i % 50 == 0:
+                prog.flush()
+            if i % 500 == 0 or i == len(todo):
+                print(f"  mint {i}/{len(todo)} changed={changed} {time.time() - t0:.1f}s", flush=True)
+    finally:
+        prog.flush()
+        prog.close()
+    print(f"  mint done: changed={changed}", flush=True)
+    return present
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C)) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
 
@@ -3432,6 +3592,11 @@ def main() -> None:
         help="last: fade fog-dominated pixels near the edge (dashed traces, gray-washed windows, straight cut-offs) to beige with a feathered, wobbled ramp (free, idempotent)",
     )
     ap.add_argument(
+        "--polish-mint",
+        action="store_true",
+        help="after --polish-fogline: turn teal procedural-staging greens near the edge toward the restyled forest hue (free, idempotent)",
+    )
+    ap.add_argument(
         "--fade",
         type=int,
         default=None,
@@ -3524,7 +3689,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -3550,6 +3715,10 @@ def main() -> None:
                 pad_rgb=pad_rgb,
                 fade=fade,
             )
+        elif args.polish_mint:
+            fade = args.fade if args.fade is not None else VIGNETTE_FADE
+            print(f"  mint rims → {dest}", flush=True)
+            z0_present = polish_mint(dest, grid, fade=fade)
         elif args.polish_fogline:
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  fog boundary cleanup → {dest}", flush=True)
