@@ -1906,6 +1906,16 @@ class SeamsPolishTest(unittest.TestCase):
             self.assertGreater(float(np.abs(stuck[:, 199].astype(int) - stuck[:, 200].astype(int)).mean()), before * 0.9)
 
 
+_REAL_TONE_APPLY = SF._tone_apply
+
+
+def _paused_tone_apply(key):
+    """Stands in for a box that pauses mid-run: the last tile never finishes."""
+    if key == (2, 0):
+        raise RuntimeError("paused")
+    return _REAL_TONE_APPLY(key)
+
+
 class HouseToneTest(unittest.TestCase):
     """--polish-tone: one house tone over the restyle, no seams, detail kept."""
 
@@ -2021,6 +2031,42 @@ class HouseToneTest(unittest.TestCase):
             SF.polish_tone(dest, grid, proc_dest=proc, workers=2)
             self.assertEqual(before, (dest / "0" / "1_0.webp").read_bytes())
         finally:
+            shutil.rmtree(tmp)
+
+    def test_polish_tone_resumes_after_an_interrupted_apply(self):
+        tmp = Path(tempfile.mkdtemp())
+        real = SF._tone_apply
+        try:
+            S = SF.TILE
+            cols, rows = 3, 1
+            orig = self._orig_lab(rows * S, cols * S, seed=5)
+            rest = self._house(orig)
+            rest[:, S : 2 * S, 0] -= 10.0
+            dest, proc = tmp / "tiles-restyled", tmp / "tiles"
+            for tx in range(cols):
+                sl = np.s_[:, tx * S : (tx + 1) * S]
+                for d, lab in ((dest, rest), (proc, orig)):
+                    (d / "0").mkdir(parents=True, exist_ok=True)
+                    Image.fromarray(TN.lab_to_rgb(lab[sl])).save(d / "0" / f"{tx}_0.webp", lossless=True)
+            grid = {"cols": cols, "rows": rows, "ox": 0, "oy": 0}
+
+            SF._tone_apply = _paused_tone_apply
+            with self.assertRaises(RuntimeError):
+                SF.polish_tone(dest, grid, proc_dest=proc, workers=1)
+            SF._tone_apply = real
+            self.assertTrue((dest / ".tone-fields.npz").exists())
+            self.assertIn("0 0", (dest / ".tone-progress.txt").read_text())
+            self.assertFalse((dest / ".tone-stamp").exists())
+            SF.polish_tone(dest, grid, proc_dest=proc, workers=1)
+            self.assertTrue((dest / ".tone-stamp").exists())
+            self.assertFalse((dest / ".tone-progress.txt").exists())
+            means = []
+            for tx in range(cols):
+                with Image.open(dest / "0" / f"{tx}_0.webp") as im:
+                    means.append(float(TN.rgb_to_lab(np.asarray(im.convert("RGB")))[..., 0].mean()))
+            self.assertLess(max(means) - min(means), 2.0)
+        finally:
+            SF._tone_apply = real
             shutil.rmtree(tmp)
 
 

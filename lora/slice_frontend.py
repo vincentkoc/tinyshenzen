@@ -62,6 +62,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import pickle
 import shutil
 import time
 from pathlib import Path
@@ -4183,128 +4184,209 @@ def polish_tone(
         print("  tone already applied", flush=True)
         return present_from_disk(dest, cols, rows)
 
-    t0 = time.time()
-    bx = min(x for x, _ in present)
-    by = min(y for _, y in present)
-    bw = max(x for x, _ in present) - bx + 1
-    bh = max(y for _, y in present) - by + 1
-    C = TILE // TN.TONE_CELL
-    R = np.zeros((bh * C, bw * C, 3), np.float32)
-    O = np.zeros_like(R)
-    ER = np.zeros((bh * C, bw * C), np.float32)
-    EO = np.zeros_like(ER)
-    okR = np.zeros(ER.shape, bool)
-    okO = np.zeros(ER.shape, bool)
-    _TONE.clear()
-    _TONE.update(src0=src0, orig0=proc_dest / "0", bx=bx, by=by, xl=xl, yl=yl, lossless=lossless_z0)
+    def compute(cache: dict | None) -> dict:
+        t0 = time.time()
+        bx = min(x for x, _ in present)
+        by = min(y for _, y in present)
+        bw = max(x for x, _ in present) - bx + 1
+        bh = max(y for _, y in present) - by + 1
+        C = TILE // TN.TONE_CELL
+        R = np.zeros((bh * C, bw * C, 3), np.float32)
+        O = np.zeros_like(R)
+        ER = np.zeros((bh * C, bw * C), np.float32)
+        EO = np.zeros_like(ER)
+        okR = np.zeros(ER.shape, bool)
+        okO = np.zeros(ER.shape, bool)
+        _TONE.clear()
+        _TONE.update(src0=src0, orig0=proc_dest / "0", bx=bx, by=by, xl=xl, yl=yl, lossless=lossless_z0)
+        ctx = mp.get_context("fork")
+        with ctx.Pool(workers) as pool:
+            for tx, ty, r, o in pool.imap_unordered(_tone_cells, sorted(present), chunksize=8):
+                s = np.s_[(ty - by) * C : (ty - by + 1) * C, (tx - bx) * C : (tx - bx + 1) * C]
+                if r is not None:
+                    R[s], ER[s], okR[s] = r[0], r[1], True
+                if o is not None:
+                    O[s], EO[s], okO[s] = o[0], o[1], True
+        print(f"  tone cells {R.shape[1]}x{R.shape[0]} in {time.time() - t0:.0f}s", flush=True)
+
+        alpha = np.zeros(ER.shape, np.float32)
+        dist_path = dest / ".vignette-dist.npz"
+        if dist_path.exists():
+            field = np.load(dist_path)["field"]
+            rep = VIGNETTE_SCALE // TN.TONE_CELL
+            f = np.repeat(np.repeat(field, rep, 0), rep, 1)[by * C : (by + bh) * C, bx * C : (bx + bw) * C]
+            alpha[: f.shape[0], : f.shape[1]] = TN.smoothstep(f, -float(VIGNETTE_INSET), float(VIGNETTE_FADE))
+        fog_lab = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
+        pad_lab = TN.rgb_to_lab(np.array((0x1A, 0x1E, 0x1C), np.uint8))
+        fogR = np.linalg.norm(R - fog_lab, axis=-1) < 3.0
+        padO = np.linalg.norm(O - pad_lab, axis=-1) < 6.0
+        valid = okR & okO & (alpha < 0.02) & ~fogR & ~padO
+        style = TN.fit_house_style(O[valid], R[valid])
+        TO = np.empty_like(O)
+        for y in range(0, O.shape[0], 256):
+            TO[y : y + 256] = TN.apply_house_style(style, O[y : y + 256])
+        wash = TN.wash_weight(R, ER, EO, okR & okO & (alpha < 0.5)) * (1.0 - alpha)
+        del ER, EO
+        weights = valid * (1.0 - np.clip(wash * 4.0, 0.0, 1.0))
+        _TONE.update(style=style, alpha=alpha, wash=wash)
+        print(f"  tone house style fitted on {int(valid.sum())} cells, wash cells {int((wash > 0.5).sum())}", flush=True)
+
+        if region is not None:
+            rx0, ry0, rx1, ry1 = region
+            work = {(x, y) for x, y in present if rx0 <= x < rx1 and ry0 <= y < ry1}
+            m = TONE_CONTEXT
+            measure = {(x, y) for x, y in present if rx0 - m <= x < rx1 + m and ry0 - m <= y < ry1 + m}
+            # Crop the cell fields to the context so a preview is quick.
+            cx0, cy0 = max(bx, rx0 - m), max(by, ry0 - m)
+            cx1, cy1 = min(bx + bw, rx1 + m), min(by + bh, ry1 + m)
+            cs = np.s_[(cy0 - by) * C : (cy1 - by) * C, (cx0 - bx) * C : (cx1 - bx) * C]
+            R, O, TO = R[cs], O[cs], TO[cs]
+            alpha, wash, weights = alpha[cs], wash[cs], weights[cs]
+            bx, by = cx0, cy0
+            _TONE.update(bx=bx, by=by, alpha=alpha, wash=wash)
+        else:
+            work = set(present)
+            measure = set(present)
+
+        segs: list[tuple] = []
+        edges: dict = {}
+        measured: dict = {}
+        if cache is not None and cache["measure"].exists():
+            with open(cache["measure"], "rb") as fh:
+                while True:
+                    try:
+                        key, st = pickle.load(fh)
+                    except EOFError:
+                        break
+                    except Exception:
+                        break  # a torn last record from an interrupted run
+                    measured[key] = st
+            print(f"  tone measure: resuming, {len(measured)} tiles cached", flush=True)
+        todo = sorted(k for k in measure if k not in measured)
+        fh = open(cache["measure"], "ab") if cache is not None else None
+        try:
+            with ctx.Pool(workers) as pool:
+                for n, (tx, ty, st) in enumerate(pool.imap_unordered(_tone_measure, todo, chunksize=4), 1):
+                    measured[(tx, ty)] = st
+                    if fh is not None:
+                        pickle.dump(((tx, ty), st), fh)
+                        if n % 50 == 0:
+                            fh.flush()
+                    if n % 500 == 0:
+                        print(f"  tone measure {n}/{len(todo)}, {time.time() - t0:.0f}s", flush=True)
+        finally:
+            if fh is not None:
+                fh.close()
+        for (tx, ty), st in sorted(measured.items()):
+                if st is None:
+                    continue
+                for axis, k, j, step in st["steps"]:
+                    lines, other = (xl, yl) if axis == "x" else (yl, xl)
+                    if np.any(step):
+                        segs.append((0 if axis == "x" else 1, lines[k], other[j], other[j + 1], *step))
+                edges[(tx, ty)] = st["edges"]
+        # Tile-edge lines: pair the neighbour's band with this tile's band.
+        for (tx, ty), e in edges.items():
+            for axis, nb in (("x", (tx - 1, ty)), ("y", (tx, ty - 1))):
+                other = edges.get(nb)
+                if other is None or (axis, "lo") not in e or (axis, "hi") not in other:
+                    continue
+                (rm, rok), (lm, lok) = e[(axis, "lo")], other[(axis, "hi")]
+                c, lines, a0 = (tx * TILE, yl, ty * TILE) if axis == "x" else (ty * TILE, xl, tx * TILE)
+                j0, j1 = int(np.searchsorted(lines, a0)), int(np.searchsorted(lines, a0 + TILE))
+                for j in range(j0, j1):
+                    sa, sb = lines[j] - a0, lines[j + 1] - a0
+                    step = TN.step_stat(lm[sa:sb], rm[sa:sb], lok[sa:sb] & rok[sa:sb])
+                    if np.any(step):
+                        segs.append((0 if axis == "x" else 1, c, lines[j], lines[j + 1], *step))
+        segments = np.array(segs, np.float32).reshape(-1, 7)
+        print(f"  tone steps: {len(segments)} seam segments to cancel, {time.time() - t0:.0f}s", flush=True)
+
+        # Cell-level step field, then the smooth correction on what is left.
+        TO -= R
+        del R, O
+        band = 64
+        for y in range(0, TO.shape[0], band):
+            hh = min(band, TO.shape[0] - y)
+            sf = TN.step_field(segments, bx * TILE, by * TILE + y * TN.TONE_CELL, TO.shape[1], hh, TN.TONE_CELL)
+            TO[y : y + hh] -= sf * (1.0 - alpha[y : y + hh])[..., None]
+        # The smooth field is low-pass anyway: solve it on 2x2-pooled cells.
+        h2, w2 = TO.shape[0] // 2, TO.shape[1] // 2
+        w4 = weights[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2)
+        wsum = w4.sum((1, 3))
+        res2 = (TO[: h2 * 2, : w2 * 2] * weights[: h2 * 2, : w2 * 2, None]).reshape(h2, 2, w2, 2, 3).sum((1, 3))
+        res2 /= np.maximum(wsum, 1e-6)[..., None]
+        del TO
+        corr, stren = TN.correction_field(res2, wsum / 4.0, sigma=TN.TONE_SIGMA / 2.0)
+        stren *= 1.0 - alpha[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2).mean((1, 3))
+        _TONE.update(corr=corr, stren=stren, segments=segments)
+        print(f"  tone field done, {time.time() - t0:.0f}s", flush=True)
+        return {"style": style, "alpha": alpha, "wash": wash, "corr": corr, "stren": stren,
+                "segments": segments, "bx": bx, "by": by, "work": work}
+
+    resumable = region is None and out_dir is None
+    cache = None
+    if resumable:
+        cache = {"stamp": dest / ".tone-cache-stamp", "fields": dest / ".tone-fields.npz",
+                 "measure": dest / ".tone-measure.pkl", "progress": dest / ".tone-progress.txt"}
+        if not cache["stamp"].exists() or cache["stamp"].read_text() != stamp:
+            for k in ("fields", "measure", "progress"):
+                if cache[k].exists():
+                    cache[k].unlink()
+            cache["stamp"].write_text(stamp)
     ctx = mp.get_context("fork")
-    with ctx.Pool(workers) as pool:
-        for tx, ty, r, o in pool.imap_unordered(_tone_cells, sorted(present), chunksize=8):
-            s = np.s_[(ty - by) * C : (ty - by + 1) * C, (tx - bx) * C : (tx - bx + 1) * C]
-            if r is not None:
-                R[s], ER[s], okR[s] = r[0], r[1], True
-            if o is not None:
-                O[s], EO[s], okO[s] = o[0], o[1], True
-    print(f"  tone cells {R.shape[1]}x{R.shape[0]} in {time.time() - t0:.0f}s", flush=True)
-
-    alpha = np.zeros(ER.shape, np.float32)
-    dist_path = dest / ".vignette-dist.npz"
-    if dist_path.exists():
-        field = np.load(dist_path)["field"]
-        rep = VIGNETTE_SCALE // TN.TONE_CELL
-        f = np.repeat(np.repeat(field, rep, 0), rep, 1)[by * C : (by + bh) * C, bx * C : (bx + bw) * C]
-        alpha[: f.shape[0], : f.shape[1]] = TN.smoothstep(f, -float(VIGNETTE_INSET), float(VIGNETTE_FADE))
-    fog_lab = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
-    pad_lab = TN.rgb_to_lab(np.array((0x1A, 0x1E, 0x1C), np.uint8))
-    fogR = np.linalg.norm(R - fog_lab, axis=-1) < 3.0
-    padO = np.linalg.norm(O - pad_lab, axis=-1) < 6.0
-    valid = okR & okO & (alpha < 0.02) & ~fogR & ~padO
-    style = TN.fit_house_style(O[valid], R[valid])
-    TO = np.empty_like(O)
-    for y in range(0, O.shape[0], 256):
-        TO[y : y + 256] = TN.apply_house_style(style, O[y : y + 256])
-    wash = TN.wash_weight(R, ER, EO, okR & okO & (alpha < 0.5)) * (1.0 - alpha)
-    del ER, EO
-    weights = valid * (1.0 - np.clip(wash * 4.0, 0.0, 1.0))
-    _TONE.update(style=style, alpha=alpha, wash=wash)
-    print(f"  tone house style fitted on {int(valid.sum())} cells, wash cells {int((wash > 0.5).sum())}", flush=True)
-
-    if region is not None:
-        rx0, ry0, rx1, ry1 = region
-        work = {(x, y) for x, y in present if rx0 <= x < rx1 and ry0 <= y < ry1}
-        m = TONE_CONTEXT
-        measure = {(x, y) for x, y in present if rx0 - m <= x < rx1 + m and ry0 - m <= y < ry1 + m}
-        # Crop the cell fields to the context so a preview is quick.
-        cx0, cy0 = max(bx, rx0 - m), max(by, ry0 - m)
-        cx1, cy1 = min(bx + bw, rx1 + m), min(by + bh, ry1 + m)
-        cs = np.s_[(cy0 - by) * C : (cy1 - by) * C, (cx0 - bx) * C : (cx1 - bx) * C]
-        R, O, TO = R[cs], O[cs], TO[cs]
-        alpha, wash, weights = alpha[cs], wash[cs], weights[cs]
-        bx, by = cx0, cy0
-        _TONE.update(bx=bx, by=by, alpha=alpha, wash=wash)
+    t0 = time.time()
+    if cache is not None and cache["fields"].exists():
+        z = np.load(cache["fields"], allow_pickle=False)
+        f = {k: z[k] for k in ("alpha", "wash", "corr", "stren", "segments")}
+        f["style"] = {"coef": z["coef"], "lut": z["lut"]}
+        f["bx"], f["by"] = int(z["bx"]), int(z["by"])
+        f["work"] = set(present)
+        print("  tone fields: loaded from cache", flush=True)
     else:
-        work = set(present)
-        measure = set(present)
-
-    segs: list[tuple] = []
-    edges: dict = {}
-    with ctx.Pool(workers) as pool:
-        for tx, ty, st in pool.imap_unordered(_tone_measure, sorted(measure), chunksize=4):
-            if st is None:
-                continue
-            for axis, k, j, step in st["steps"]:
-                lines, other = (xl, yl) if axis == "x" else (yl, xl)
-                if np.any(step):
-                    segs.append((0 if axis == "x" else 1, lines[k], other[j], other[j + 1], *step))
-            edges[(tx, ty)] = st["edges"]
-    # Tile-edge lines: pair the neighbour's band with this tile's band.
-    for (tx, ty), e in edges.items():
-        for axis, nb in (("x", (tx - 1, ty)), ("y", (tx, ty - 1))):
-            other = edges.get(nb)
-            if other is None or (axis, "lo") not in e or (axis, "hi") not in other:
-                continue
-            (rm, rok), (lm, lok) = e[(axis, "lo")], other[(axis, "hi")]
-            c, lines, a0 = (tx * TILE, yl, ty * TILE) if axis == "x" else (ty * TILE, xl, tx * TILE)
-            j0, j1 = int(np.searchsorted(lines, a0)), int(np.searchsorted(lines, a0 + TILE))
-            for j in range(j0, j1):
-                sa, sb = lines[j] - a0, lines[j + 1] - a0
-                step = TN.step_stat(lm[sa:sb], rm[sa:sb], lok[sa:sb] & rok[sa:sb])
-                if np.any(step):
-                    segs.append((0 if axis == "x" else 1, c, lines[j], lines[j + 1], *step))
-    segments = np.array(segs, np.float32).reshape(-1, 7)
-    print(f"  tone steps: {len(segments)} seam segments to cancel, {time.time() - t0:.0f}s", flush=True)
-
-    # Cell-level step field, then the smooth correction on what is left.
-    TO -= R
-    del R, O
-    band = 64
-    for y in range(0, TO.shape[0], band):
-        hh = min(band, TO.shape[0] - y)
-        sf = TN.step_field(segments, bx * TILE, by * TILE + y * TN.TONE_CELL, TO.shape[1], hh, TN.TONE_CELL)
-        TO[y : y + hh] -= sf * (1.0 - alpha[y : y + hh])[..., None]
-    # The smooth field is low-pass anyway: solve it on 2x2-pooled cells.
-    h2, w2 = TO.shape[0] // 2, TO.shape[1] // 2
-    w4 = weights[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2)
-    wsum = w4.sum((1, 3))
-    res2 = (TO[: h2 * 2, : w2 * 2] * weights[: h2 * 2, : w2 * 2, None]).reshape(h2, 2, w2, 2, 3).sum((1, 3))
-    res2 /= np.maximum(wsum, 1e-6)[..., None]
-    del TO
-    corr, stren = TN.correction_field(res2, wsum / 4.0, sigma=TN.TONE_SIGMA / 2.0)
-    stren *= 1.0 - alpha[: h2 * 2, : w2 * 2].reshape(h2, 2, w2, 2).mean((1, 3))
-    _TONE.update(corr=corr, stren=stren, segments=segments)
-    print(f"  tone field done, {time.time() - t0:.0f}s", flush=True)
+        f = compute(cache)
+        if cache is not None:
+            tmpf = cache["fields"].with_name(".tone-fields.tmp.npz")
+            np.savez(tmpf, alpha=f["alpha"], wash=f["wash"], corr=f["corr"], stren=f["stren"],
+                     segments=f["segments"], coef=f["style"]["coef"], lut=f["style"]["lut"],
+                     bx=f["bx"], by=f["by"])
+            tmpf.replace(cache["fields"])
+    _TONE.clear()
+    _TONE.update(src0=src0, orig0=proc_dest / "0", bx=f["bx"], by=f["by"], xl=xl, yl=yl,
+                 lossless=lossless_z0, style=f["style"], alpha=f["alpha"], wash=f["wash"],
+                 corr=f["corr"], stren=f["stren"], segments=f["segments"])
+    work = f["work"]
 
     target = out_dir if out_dir is not None else dest / "0"
     target.mkdir(parents=True, exist_ok=True)
     _TONE["out_dir"] = target
     changed = 0
-    with ctx.Pool(workers) as pool:
-        for n, (_, _, did) in enumerate(pool.imap_unordered(_tone_apply, sorted(work), chunksize=4), 1):
-            changed += int(did)
-            if n % 500 == 0:
-                print(f"  tone {n}/{len(work)} tiles, {changed} changed, {time.time() - t0:.0f}s", flush=True)
-    if region is None and out_dir is None:
+    done: set[tuple[int, int]] = set()
+    if cache is not None and cache["progress"].exists():
+        for line in cache["progress"].read_text().split("\n"):
+            parts = line.split()
+            if len(parts) == 2:
+                done.add((int(parts[0]), int(parts[1])))
+        print(f"  tone apply: resuming, {len(done & work)} tiles already done", flush=True)
+    todo = sorted(work - done)
+    prog = open(cache["progress"], "a") if cache is not None else None
+    try:
+        with ctx.Pool(workers) as pool:
+            for n, (tx, ty, did) in enumerate(pool.imap_unordered(_tone_apply, todo, chunksize=1), 1):
+                changed += int(did)
+                if prog is not None:
+                    prog.write(f"{tx} {ty}\n")
+                    prog.flush()
+                if n % 500 == 0:
+                    print(f"  tone {n}/{len(todo)} tiles, {changed} changed, {time.time() - t0:.0f}s", flush=True)
+    finally:
+        if prog is not None:
+            prog.close()
+    if cache is not None:
         stamp_path.write_text(stamp)
+        for k in ("fields", "measure", "progress", "stamp"):
+            if cache[k].exists():
+                cache[k].unlink()
     print(f"  tone done: {changed}/{len(work)} tiles changed, {time.time() - t0:.0f}s", flush=True)
     _TONE.clear()
     return present_from_disk(dest, cols, rows)
