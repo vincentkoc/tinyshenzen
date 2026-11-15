@@ -107,3 +107,48 @@ describe("tinysz", () => {
     expect(tinyszLuohu.start.lon).toBe(CAIWUWEI.lon);
   });
 });
+
+describe("life on the map", () => {
+  const on = (bbox: { west: number; south: number; east: number; north: number }, path: number[][]) =>
+    path.every(([lon, lat]) => inside(bbox, lon, lat));
+
+  it("gives the core the Shekou ferry, a harbour cruise, a tour helicopter and an SZX approach", () => {
+    const boats = tinyszCore.boats ?? [];
+    expect(boats.map((b) => b.name)).toEqual(["Shekou ferry", "Shenzhen Bay cruise"]);
+    expect(tinyszCore.flights.map((f) => f.kind)).toEqual(["helicopter", "plane"]);
+    for (const boat of boats) {
+      expect(boat.path.length).toBeGreaterThan(2);
+      expect(on(CORE_BBOX, boat.path)).toBe(true);
+    }
+    for (const flight of tinyszCore.flights) {
+      expect(flight.path.length).toBeGreaterThan(2);
+      expect(on(CORE_BBOX, flight.path)).toBe(true);
+    }
+    // the ferry leaves Shekou Port and heads east across the bay
+    const ferry = boats[0]!;
+    expect(ferry.path[0]![0]).toBeCloseTo(113.913);
+    expect(ferry.path[0]![1]).toBeCloseTo(22.478);
+    expect(ferry.path.at(-1)![0]).toBeGreaterThan(ferry.path[0]![0]);
+    // the plane flies west-north-west toward Bao'an
+    const plane = tinyszCore.flights.find((f) => f.kind === "plane")!;
+    expect(plane.loop).toBe(false);
+    expect(plane.path.at(-1)![0]).toBeLessThan(plane.path[0]![0]);
+    expect(plane.path.at(-1)![1]).toBeGreaterThan(plane.path[0]![1]);
+    expect(plane.path[0]![2]).toBeGreaterThan(plane.path.at(-1)![2]);
+  });
+
+  it("keeps only what fits each box: boats need the bay, the helicopter fits Futian, the plane needs the core", () => {
+    expect(tinysz.boats ?? []).toEqual([]);
+    expect(tinysz.flights.map((f) => f.kind)).toEqual(["helicopter"]);
+    expect(on(TEST_BBOX, tinysz.flights[0]!.path)).toBe(true);
+
+    expect((tinyszNanshan.boats ?? []).map((b) => b.name)).toEqual(["Shekou ferry", "Shenzhen Bay cruise"]);
+    expect(tinyszNanshan.flights).toEqual([]);
+
+    expect(tinyszLuohu.boats ?? []).toEqual([]);
+    expect(tinyszLuohu.flights).toEqual([]);
+
+    expect(tinyszFull.boats).toEqual(tinyszCore.boats);
+    expect(tinyszFull.flights).toEqual(tinyszCore.flights);
+  });
+});

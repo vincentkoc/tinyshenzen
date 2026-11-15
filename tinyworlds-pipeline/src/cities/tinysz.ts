@@ -42,6 +42,74 @@ export const HOUHAI = { lon: 113.94167, lat: 22.51694 };
 /** KK100 in Caiwuwei, a natural start for the Luohu box. */
 export const CAIWUWEI = { lon: 114.10194, lat: 22.54667 };
 
+const inside = (bbox: City["bbox"], lon: number, lat: number): boolean =>
+  lon >= bbox.west && lon <= bbox.east && lat >= bbox.south && lat <= bbox.north;
+
+/**
+ * Boats and flights the data has no route for. Overture has no water segments on these maps,
+ * and the Futian test box has no sea; each city keeps only the routes that sit entirely
+ * inside its box.
+ */
+const BOATS: NonNullable<City["boats"]> = [
+  {
+    // from Shekou Port out east across Shenzhen Bay, short of the mangrove shore
+    name: "Shekou ferry",
+    path: [
+      [113.913, 22.478],
+      [113.925, 22.477],
+      [113.94, 22.477],
+      [113.955, 22.478],
+      [113.968, 22.48],
+      [113.978, 22.481],
+    ],
+  },
+  {
+    // a harbour boat along the Houhai / Shenzhen Bay Park waterfront
+    name: "Shenzhen Bay cruise",
+    path: [
+      [113.958, 22.514],
+      [113.97, 22.512],
+      [113.982, 22.511],
+      [113.994, 22.51],
+      [114.006, 22.509],
+      [114.016, 22.508],
+    ],
+  },
+];
+
+const FLIGHTS: City["flights"] = [
+  {
+    // a tour loop over the Civic Center, Ping An Finance Centre and Lianhuashan
+    kind: "helicopter",
+    loop: true,
+    speed: 40,
+    path: [
+      [114.068, 22.545, 240],
+      [114.058, 22.538, 260],
+      [114.052, 22.536, 280],
+      [114.054, 22.544, 250],
+      [114.06, 22.554, 220],
+      [114.072, 22.552, 230],
+      [114.078, 22.545, 240],
+      [114.072, 22.538, 250],
+    ],
+  },
+  {
+    // a plane on approach toward Bao'an (SZX), crossing the core west-north-west
+    kind: "plane",
+    loop: false,
+    speed: 70,
+    pause: 50,
+    path: [
+      [114.08, 22.542, 1100],
+      [114.05, 22.548, 1000],
+      [114.01, 22.554, 900],
+      [113.96, 22.558, 800],
+      [113.915, 22.561, 720],
+    ],
+  },
+];
+
 /** English names for districts the data often has only in Chinese. */
 const DISTRICT_NAMES: Record<string, string> = {
   福田区: "Futian",
@@ -155,7 +223,8 @@ function shenzhen(spec: {
     ground: {},
 
     curated: CURATED,
-    flights: [],
+    boats: BOATS.filter((boat) => boat.path.every(([lon, lat]) => inside(spec.bbox, lon, lat))),
+    flights: FLIGHTS.filter((flight) => flight.path.every(([lon, lat]) => inside(spec.bbox, lon, lat))),
     sights: {
       placeWords: ["Shenzhen", "深圳", "Shumchun", "Shum Chun"],
       aliases: {
