@@ -20,6 +20,7 @@ Higher zoom levels are rebuilt after every pass.
 | 4 | `--polish-mint --polish-spots FILE` | Mint: teal procedural-staging rims near the edge turn toward the restyled forest hue; real water and glass are left alone. Spots: one-off fixes listed in a JSON file, including milky river veils. |
 | 5 | `--polish-seams` | Feathers a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are still on disk. Only the low-frequency colour is moved, and only where both sides are the same kind of surface, so a building cut or a river bank is not smeared. |
 | 6 | `--polish-tone` | Gives the whole restyle one house tone. Replaces step 5: it reads the tiles from before the seam blend. See [House tone](#house-tone). |
+| 7 | `--polish-gaps --gaps-backup DIR` | Fills holes inside the city: beige voids, ghostly veils, buildings cut off on a tile or window line, and blurry patches. See [Gaps](#gaps). |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
 windows, `--polish-water` needs them for the district water masks, and
@@ -79,6 +80,50 @@ The edge is left alone: the pass tapers off from 384 px inside the coverage edge
 with `--tone-out DIR` to preview a few tiles without touching the map. After a
 reslice, or after re-running an earlier pass, delete `.tone-src/` so it is
 seeded again.
+
+## Gaps
+
+Some of the city came back from the restyle as a hole: a flat beige void, a
+ghostly veil where towers are drawn at a quarter of their contrast, a block
+that stops on a 512-px tile line, or a smeared patch. Most sit where two
+districts overlap and each district's own edge fade left a wash. The tone pass
+evens colour and cannot redraw any of these. `--polish-gaps` runs last:
+
+1. Every z0 tile inside the city is scored on one global 16-px cell grid
+   against the original (`tiles/`). The city is where the original has
+   content, not its dithered dark edge fog, and lies deep inside the restyle
+   coverage (the vignette field below -820 px), so the outer fog never counts.
+   Smooth restyle water over the original's dithered water is not a gap.
+2. A cell is a gap when the original has sharp edges (buildings, roads, trees)
+   and the restyle has far fewer, or keeps them at a fraction of their
+   contrast, or is flat beige there. Cells are grouped into regions with
+   hysteresis (seeded at 0.4, grown through connected cells above 0.2) and
+   classed as `void`, `cutoff` (a long side on a tile or window line) or
+   `blur`. Whole tiles far below their neighbours' detail are listed as blurry
+   squares too.
+3. Each region is filled from the best free source. First come the restyle
+   windows on disk: the windows overlap by 256 px, and another district's
+   window often still has the area intact. A window counts when it correlates
+   with the original at full contrast there and is not an unrestyled fog-window
+   copy. Windows are tried greedily, up to four per region. What is left comes
+   from the original through the fitted house-tone transform. Either source
+   is nudged toward the surrounding restyle with a robust 96-px low-pass and
+   blended in with a soft mask. Water and the original's fog dither are never
+   refilled from the original.
+
+```bash
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-gaps \
+  --gaps-backup /workspace/tinysz-core-z0-backup-gaps --gaps-report /tmp/gaps-report
+```
+
+Only the z0 tiles that change are written, after a copy of each goes to
+`--gaps-backup DIR/0`. A re-run starts from those copies, so it lands on the
+same tiles. Only the pyramid tiles above them are rebuilt, then the overview
+and the manifest build. `--gaps-stage DIR` writes all of that to `DIR` (same
+layout as `--out`) instead and leaves the map alone, for a review before
+copying it over. `--gaps-report DIR` writes `gaps.json`, a ranked list with
+the source used for each region, and `sheet.jpg`, the worst 40 as original,
+before and after.
 
 ## Spots file
 
