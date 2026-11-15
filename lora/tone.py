@@ -39,6 +39,10 @@ TONE_WASH_RATIO = (1.5, 2.5)  # log2 detail deficit ramp for a wash
 TONE_WASH_DETAIL = (2.0, 4.0)  # original detail (mean |dL|) that must be there
 TONE_WASH_L = 70.0  # a wash is light
 TONE_WASH_BLUR = 2.0  # cells
+TONE_EDGE_IN = 384.0  # px inside the coverage edge where the pass starts to let go
+TONE_EDGE_OUT = 64.0  # px outside it where it has let go completely
+TONE_WASH_DEEP = (-860.0, -700.0)  # refill washes only this deep inside the edge (the vignette field saturates at -864)
+TONE_FOG_KEEP = (2.0, 8.0)  # Lab distance from viewer fog: fog pixels are not toned
 
 _M = np.array(
     [[0.4124564, 0.3575761, 0.1804375], [0.2126729, 0.7151522, 0.0721750], [0.0193339, 0.1191920, 0.9503041]],
@@ -284,9 +288,16 @@ def tone_tile(
     corr: np.ndarray,
     strength: np.ndarray,
     wash: np.ndarray,
+    fog_lab: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Apply a sampled correction (size, size, 3) and wash fill to one tile."""
+    """Apply a sampled correction (size, size, 3) and wash fill to one tile.
+
+    Pixels at the viewer-fog colour (`fog_lab`) are left as fog: the edge
+    passes put them there on purpose, and toning them would draw gray blots.
+    """
     lab = rgb_to_lab(rest_rgb)
+    if fog_lab is not None:
+        strength = strength * smoothstep(np.linalg.norm(lab - fog_lab, axis=-1), *TONE_FOG_KEEP)
     lab = lab + corr * strength[..., None]
     if orig_rgb is not None and float(wash.max()) > 1e-3:
         house = apply_house_style(style, rgb_to_lab(orig_rgb))

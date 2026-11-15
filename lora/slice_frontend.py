@@ -4116,7 +4116,9 @@ def _tone_apply(key: tuple[int, int]):
     stren = TN.sample_cells(_TONE["stren"], gx, gy, TILE, cell=cc)
     step = TN.step_field(_TONE["segments"], tx * TILE, ty * TILE, TILE, TILE)
     total = step * (1.0 - alpha)[..., None] + corr * stren[..., None]
-    out = TN.tone_tile(rest, orig, _TONE["style"], total, np.ones_like(stren), wash if orig is not None else np.zeros_like(wash))
+    fog_lab = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
+    out = TN.tone_tile(rest, orig, _TONE["style"], total, np.ones_like(stren),
+                       wash if orig is not None else np.zeros_like(wash), fog_lab=fog_lab)
     out_dir: Path = _TONE["out_dir"]
     path = out_dir / f"{tx}_{ty}.webp"
     cur = _tone_load(path)
@@ -4133,7 +4135,9 @@ def tone_stamp(xl: np.ndarray, yl: np.ndarray) -> str:
         f"{TN.TONE_VERSION} cell={TN.TONE_CELL} sigma={TN.TONE_SIGMA} robust={TN.TONE_ROBUST} "
         f"band={TN.TONE_BAND} consist={TN.TONE_STEP_CONSIST} min={TN.TONE_STEP_MIN} gate={TN.TONE_STEP_GATE} "
         f"reach={TN.TONE_STEP_REACH} ramp={TN.TONE_STEP_RAMP} "
-        f"wash={TN.TONE_WASH_RATIO}/{TN.TONE_WASH_DETAIL}/{TN.TONE_WASH_L} lines={len(xl)}x{len(yl)}\n"
+        f"wash={TN.TONE_WASH_RATIO}/{TN.TONE_WASH_DETAIL}/{TN.TONE_WASH_L} edge={TN.TONE_EDGE_IN}/{TN.TONE_EDGE_OUT} "
+        f"deep={TN.TONE_WASH_DEEP} fogkeep={TN.TONE_FOG_KEEP} "
+        f"lines={len(xl)}x{len(yl)}\n"
     )
 
 
@@ -4210,12 +4214,20 @@ def polish_tone(
         print(f"  tone cells {R.shape[1]}x{R.shape[0]} in {time.time() - t0:.0f}s", flush=True)
 
         alpha = np.zeros(ER.shape, np.float32)
+        deep = np.ones(ER.shape, np.float32)
         dist_path = dest / ".vignette-dist.npz"
         if dist_path.exists():
             field = np.load(dist_path)["field"]
             rep = VIGNETTE_SCALE // TN.TONE_CELL
             f = np.repeat(np.repeat(field, rep, 0), rep, 1)[by * C : (by + bh) * C, bx * C : (bx + bw) * C]
-            alpha[: f.shape[0], : f.shape[1]] = TN.smoothstep(f, -float(VIGNETTE_INSET), float(VIGNETTE_FADE))
+            # Taper well before the vignette starts: the fogline and flats passes
+            # fade ground further in than the vignette field says, and a
+            # correction (or a wash refill) on fog-blended pixels draws a dark,
+            # blocky rim along the edge.
+            alpha[: f.shape[0], : f.shape[1]] = TN.smoothstep(f, -TN.TONE_EDGE_IN, TN.TONE_EDGE_OUT)
+            # Fog-coloured holes near the edge are the fogline / flats passes at
+            # work; only refill washes deep inside the city.
+            deep[: f.shape[0], : f.shape[1]] = 1.0 - TN.smoothstep(f, *TN.TONE_WASH_DEEP)
         fog_lab = TN.rgb_to_lab(np.array(VIEW_FOG, np.uint8))
         pad_lab = TN.rgb_to_lab(np.array((0x1A, 0x1E, 0x1C), np.uint8))
         fogR = np.linalg.norm(R - fog_lab, axis=-1) < 3.0
@@ -4225,7 +4237,8 @@ def polish_tone(
         TO = np.empty_like(O)
         for y in range(0, O.shape[0], 256):
             TO[y : y + 256] = TN.apply_house_style(style, O[y : y + 256])
-        wash = TN.wash_weight(R, ER, EO, okR & okO & (alpha < 0.5)) * (1.0 - alpha)
+        wash = TN.wash_weight(R, ER, EO, okR & okO & (alpha < 0.5)) * (1.0 - alpha) * deep
+        del deep
         del ER, EO
         weights = valid * (1.0 - np.clip(wash * 4.0, 0.0, 1.0))
         _TONE.update(style=style, alpha=alpha, wash=wash)
