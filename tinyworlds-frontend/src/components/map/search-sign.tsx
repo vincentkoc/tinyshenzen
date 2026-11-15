@@ -4,6 +4,7 @@ import { ArrowLeft, Search, X } from "lucide-react";
 import { useId, useMemo, useState, type KeyboardEvent, type RefObject } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/hooks/use-i18n";
+import { isComposing } from "@/lib/ime";
 import { cn } from "@/lib/utils";
 import type { Place } from "@/map/manifest";
 import type { SearchIndex } from "@/map/search";
@@ -68,6 +69,8 @@ export function SearchSign({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Enter picks a pinyin candidate, Escape drops it: leave both to the IME
+    if (isComposing(e)) return;
     if (e.key === "ArrowDown" && results.length > 0) {
       e.preventDefault();
       setActive((current + 1) % results.length);
