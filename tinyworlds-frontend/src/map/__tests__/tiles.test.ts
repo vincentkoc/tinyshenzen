@@ -187,4 +187,42 @@ describe("planTiles", () => {
     expect(plan.wanted.some((w) => w.z === 0 && w.tx === 4 && w.ty === 2)).toBe(false);
     expect(plan.wanted).toContainEqual(expect.objectContaining({ z: 1, tx: 2, ty: 1, pri: 1 }));
   });
+
+  it("can skip the ring and skip native tiles while a pan is in flight", () => {
+    const none = planTiles(
+      pyramid,
+      view,
+      () => false,
+      () => false,
+      { ring: 0 },
+    );
+    expect(none.wanted.every((w) => w.pri !== 2)).toBe(true);
+    expect(none.wanted.some((w) => w.z === 0 && w.tx === 4 && w.ty === 2)).toBe(true);
+
+    const deferred = planTiles(
+      pyramid,
+      view,
+      () => false,
+      () => false,
+      {
+        ring: 0,
+        deferNative: true,
+      },
+    );
+    expect(deferred.wanted.some((w) => w.z === 0)).toBe(false);
+    expect(deferred.wanted.some((w) => w.z === 1 && w.tx === 2 && w.ty === 1)).toBe(true);
+  });
+
+  it("stretches the ring in the direction of a pan", () => {
+    const east = planTiles(
+      pyramid,
+      view,
+      () => false,
+      () => false,
+      { ring: 0, aheadTx: 1 },
+    );
+    const keys = east.wanted.filter((w) => w.pri === 2).map((w) => tileKey(w.z, w.tx, w.ty));
+    expect(keys).toContain("0/5_2");
+    expect(keys).not.toContain("0/3_2");
+  });
 });

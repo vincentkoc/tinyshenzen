@@ -116,6 +116,12 @@ export class Pyramid {
     return n;
   }
 
+  /** Columns and rows of a level's grid. */
+  extent(z: number): { cols: number; rows: number } | null {
+    const l = this.levels.get(z);
+    return l ? { cols: l.cols, rows: l.rows } : null;
+  }
+
   /** Every existing tile of a level. */
   all(z: number): { tx: number; ty: number }[] {
     const l = this.levels.get(z);
@@ -178,6 +184,21 @@ export interface TilePlan {
   retain: { z: number; tx: number; ty: number }[];
 }
 
+/** Tuning for one frame: how far to prefetch, and whether to skip native tiles. */
+export interface PlanOptions {
+  /** tiles of padding around the view; default `PREFETCH_RING` */
+  ring?: number;
+  /** extra tiles east (positive) or west, on top of the ring */
+  aheadTx?: number;
+  /** extra tiles south (positive) or north, on top of the ring */
+  aheadTy?: number;
+  /** skip the native level and only fetch parents (a fast pan on a slow link) */
+  deferNative?: boolean;
+  /** rank by distance to this map-px point; defaults to the view centre */
+  aimX?: number;
+  aimY?: number;
+}
+
 /**
  * Which tiles to draw, to fetch, and to keep. `has` is "already in the cache" (loading
  * or ready); `ready` is "decoded and drawable".
@@ -187,10 +208,12 @@ export function planTiles(
   view: Rect & { x: number; y: number; scale: number; dpr: number },
   has: (key: string) => boolean,
   ready: (key: string) => boolean,
+  options: PlanOptions = {},
 ): TilePlan {
   const z = levelForScale(view.scale * Math.min(view.dpr, 2), pyramid.maxZ);
   const range = pyramid.range(z, view);
-  const padded = pyramid.pad(range, PREFETCH_RING);
+  const ring = options.ring ?? PREFETCH_RING;
+  const padded = extendRange(pyramid, range, ring, options.aheadTx ?? 0, options.aheadTy ?? 0);
   const wanted: TileRequest[] = [];
   const retain: { z: number; tx: number; ty: number }[] = [];
   const seen = new Set<string>();
@@ -208,9 +231,11 @@ export function planTiles(
     if (has(key)) retain.push({ z: tz, tx, ty });
   };
 
+  const aimX = options.aimX ?? view.x;
+  const aimY = options.aimY ?? view.y;
   const distTo = (tz: number, tx: number, ty: number) => {
     const r = pyramid.tileRect(tz, tx, ty);
-    return Math.hypot((r.left + r.right) / 2 - view.x, (r.top + r.bottom) / 2 - view.y);
+    return Math.hypot((r.left + r.right) / 2 - aimX, (r.top + r.bottom) / 2 - aimY);
   };
 
   for (let ty = range.ty0; ty <= range.ty1; ty++) {
@@ -218,7 +243,7 @@ export function planTiles(
       if (!pyramid.has(z, tx, ty)) continue;
       const dist = distTo(z, tx, ty);
       const key = tileKey(z, tx, ty);
-      if (!ready(key)) want(z, tx, ty, 0, dist);
+      if (!ready(key) && !options.deferNative) want(z, tx, ty, 0, dist);
       // keep every ancestor we already have, and fetch the missing ones until a stand-in is in hand
       let covered = ready(key);
       for (const a of ancestors(z, tx, ty, pyramid.maxZ)) {
@@ -245,4 +270,25 @@ export function planTiles(
 
   wanted.sort((a, b) => a.pri - b.pri || a.dist - b.dist);
   return { z, range, wanted, retain };
+}
+
+/** Pad a range by `ring` on every side, then stretch it in the direction of a pan. */
+export function extendRange(
+  pyramid: Pyramid,
+  range: TileRange,
+  ring: number,
+  aheadTx: number,
+  aheadTy: number,
+): TileRange {
+  const padded = pyramid.pad(range, ring);
+  if (aheadTx === 0 && aheadTy === 0) return padded;
+  const ext = pyramid.extent(range.z);
+  if (!ext || padded.tx1 < padded.tx0 || padded.ty1 < padded.ty0) return padded;
+  return {
+    z: padded.z,
+    tx0: Math.max(0, padded.tx0 + (aheadTx < 0 ? aheadTx : 0)),
+    ty0: Math.max(0, padded.ty0 + (aheadTy < 0 ? aheadTy : 0)),
+    tx1: Math.min(ext.cols - 1, padded.tx1 + (aheadTx > 0 ? aheadTx : 0)),
+    ty1: Math.min(ext.rows - 1, padded.ty1 + (aheadTy > 0 ? aheadTy : 0)),
+  };
 }
