@@ -3351,7 +3351,10 @@ MINT_WATER_LO = 0.25
 MINT_WATER_HI = 0.5
 MINT_WATER_MAX_LUM = 95.0      # sea and rivers are darker than the teal haze
 MINT_WATER_MAX_STD = 6.0       # and flat, unlike clumps of teal trees
-MINT_VERSION = "mint-3"
+MINT_TEXTURE_BLOCK = 8
+MINT_TEXTURE_SIGMA = 12.0
+MINT_TEXTURE = (2.0, 6.0)      # lum std: smooth water fades stay teal
+MINT_VERSION = "mint-4"
 
 
 def rgb_hue(rgb: np.ndarray) -> np.ndarray:
@@ -3393,6 +3396,9 @@ def mint_weight(arr: np.ndarray) -> np.ndarray:
     w = w * smoothstep(chroma, *MINT_MIN_CHROMA)
     water = gaussian_blur_float(flat_teal_water(arr).astype(np.float32), MINT_WATER_SIGMA)
     w = w * (1.0 - smoothstep(water, MINT_WATER_LO, MINT_WATER_HI))
+    # staging is textured (dither, trees); water fades and fog are smooth
+    texture = gaussian_blur_float(_block_std(rgb, MINT_TEXTURE_BLOCK), MINT_TEXTURE_SIGMA)
+    w = w * smoothstep(texture, *MINT_TEXTURE)
     return w.astype(np.float32)
 
 
@@ -3411,7 +3417,7 @@ def demint(arr: np.ndarray, strength: np.ndarray | float = 1.0) -> np.ndarray:
 def mint_stamp() -> str:
     return (
         f"{MINT_VERSION} hue={MINT_HUE_LO},{MINT_HUE_HI}->{MINT_TARGET_HUE} chroma={MINT_MIN_CHROMA}x{MINT_CHROMA_SCALE} "
-        f"water={MINT_WATER_SIGMA},{MINT_WATER_MAX_LUM},{MINT_WATER_MAX_STD},{MINT_WATER_LO}-{MINT_WATER_HI}\n"
+        f"texture={MINT_TEXTURE_BLOCK},{MINT_TEXTURE_SIGMA},{MINT_TEXTURE} water={MINT_WATER_SIGMA},{MINT_WATER_MAX_LUM},{MINT_WATER_MAX_STD},{MINT_WATER_LO}-{MINT_WATER_HI}\n"
     )
 
 

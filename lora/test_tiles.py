@@ -1699,15 +1699,24 @@ class FoglinePolishTest(unittest.TestCase):
 
 class MintPolishTest(unittest.TestCase):
     def test_demint_turns_teal_staging_green_and_keeps_water_glass_forest(self):
+        yy, xx = np.mgrid[0:64, 0:64]
+        checker = ((yy + xx) % 2 == 0)[:, :, None]
+
         def one(c):
-            return SF.demint(np.tile(np.array([[c]], np.uint8), (64, 64, 1)))[32, 32].astype(int)
+            # staging is dithered: the colour on a checker with a darker copy of itself
+            dark = tuple(max(0, v - 36) for v in c)
+            arr = np.where(checker, c, dark).astype(np.uint8)
+            return SF.demint(arr)[32, 32].astype(int)
         ground = one((132, 158, 149))
         tree = one((40, 150, 100))
         self.assertLess(ground[2], ground[0])            # blue now below red, like forest
         self.assertLess(tree[2], tree[0])
         self.assertAlmostEqual(float(ground.mean()), (132 + 158 + 149) / 3, delta=2.0)
-        for keep in [(36, 88, 74), (90, 170, 190), (90, 113, 72), (233, 230, 223)]:
+        for keep in [(90, 170, 190), (90, 113, 72)]:
             self.assertTrue(np.array_equal(one(keep), np.array(keep)), keep)
+        # smooth teal (water fading into fog) stays teal
+        fade = np.tile(np.array([[(120, 160, 150)]], np.uint8), (64, 64, 1))
+        self.assertTrue(np.array_equal(SF.demint(fade), fade))
 
     def test_teal_tree_clumps_are_not_water(self):
         yy, xx = np.mgrid[0:128, 0:128]
@@ -1721,7 +1730,8 @@ class MintPolishTest(unittest.TestCase):
             dest = Path(td) / "restyle"
             (dest / "0").mkdir(parents=True)
             grid = {"ox": 0, "oy": 0, "cols": 3, "rows": 1}
-            teal = np.full((512, 512, 3), (132, 158, 149), np.uint8)
+            yy, xx = np.mgrid[0:512, 0:512]
+            teal = np.where(((yy + xx) % 2 == 0)[:, :, None], (132, 158, 149), (96, 122, 113)).astype(np.uint8)
             for tx in range(3):
                 Image.fromarray(teal, "RGB").save(dest / "0" / f"{tx}_0.webp", "WEBP", lossless=True)
             field = np.full((32, 96), -2000.0, np.float32)
