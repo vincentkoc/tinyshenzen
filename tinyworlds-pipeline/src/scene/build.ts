@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { DuckDBBlobValue, DuckDBInstance, type DuckDBConnection, type DuckDBValue } from "@duckdb/node-api";
+import polygonClipping, { type MultiPolygon } from "polygon-clipping";
 import { CITY, DIRS } from "../config.js";
 import type { Polygons } from "../cities/types.js";
 import { readAreas } from "../geom/geojson.js";
@@ -28,6 +29,7 @@ import { f32, u32, u8, writeScene } from "./store.js";
 import { R } from "../render/palette.js";
 import { chooseStyle, type Style } from "./styles.js";
 import { loadExtensions } from "../duckdb.js";
+import { LAND_USE_KEPT } from "./filters.js";
 
 /**
  * Raw open data → a scene: flat typed arrays in map pixels that the renderer can draw without
@@ -360,11 +362,17 @@ export interface BuildOptions {
 const quote = (file: string): string => path.join(DIRS.raw, file).replaceAll("'", "''");
 
 /** The fog grid for the active city: how far every point is from what counts as the city. */
+/** The limits cut down to the city's `coverage` outline, when it has one. */
+export function withinCoverage(polygons: Polygons, coverage: Polygons | undefined): Polygons {
+  if (!coverage || coverage.length === 0 || polygons.length === 0) return polygons;
+  return polygonClipping.intersection(polygons as MultiPolygon, coverage as MultiPolygon) as Polygons;
+}
+
 export async function cityFog(conn: DuckDBConnection, proj: Projection): Promise<FogGrid> {
   const limits = CITY.limits;
   if (limits.kind === "geojson") {
     const polygons = readAreas(path.join(DIRS.raw, limits.file)).flatMap((f) => f.polygons);
-    return buildFog(polygons, proj);
+    return buildFog(withinCoverage(polygons, CITY.coverage), proj);
   }
   let polygons: Polygons;
   if (limits.division) {
@@ -419,7 +427,12 @@ export async function cityFog(conn: DuckDBConnection, proj: Projection): Promise
     );
     if (parks.length === 0) throw new Error(`none of the parks ${names} is in the land use data`);
   }
-  return buildFogBuiltUp(polygons, footprints, proj, parks);
+  return buildFogBuiltUp(
+    withinCoverage(polygons, CITY.coverage),
+    footprints,
+    proj,
+    withinCoverage(parks, CITY.coverage),
+  );
 }
 
 export async function buildScene(opts: BuildOptions = {}): Promise<void> {
@@ -635,7 +648,7 @@ export async function buildScene(opts: BuildOptions = {}): Promise<void> {
   await each(
     conn,
     `SELECT subtype, class, source_tags['sport'], ST_AsWKB(geometry) FROM '${raw("land_use.parquet")}'
-     WHERE ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON') AND subtype <> 'protected'`,
+     WHERE ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON') AND subtype <> 'protected' AND ${LAND_USE_KEPT}`,
     (row) => {
       const cls = str(row[1]);
       addGround(blob(row[3]), (cls ? useKind[cls] : undefined) ?? landUseKind(str(row[0]), cls, str(row[2])));
