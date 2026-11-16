@@ -108,6 +108,11 @@
     overflow: hidden;
     overscroll-behavior: none;
   }
+  /* the HTML speaks the home language and the visitor another: hidden for the moment until React
+     has switched (i18n/early.ts), so nobody sees it change language under them */
+  html.relocalizing body {
+    visibility: hidden;
+  }
   /* the front page is a page like any other: it scrolls */
   html[data-world="home"],
   html[data-world="home"] body {

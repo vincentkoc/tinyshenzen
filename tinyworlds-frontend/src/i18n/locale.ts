@@ -22,9 +22,9 @@ export const LOCALE_NAMES: Record<Locale, string> = {
 /**
  * Any variety of a language gets the one variety we have: pt-PT reads pt-BR, es-MX reads es-ES,
  * and Chinese in any script or region (zh-TW, zh-HK, zh-Hant) reads Simplified Chinese, the only
- * Chinese there is.
+ * Chinese there is. The script that settles the language before the page paints reads it too.
  */
-const BY_LANGUAGE: Record<string, Locale> = {
+export const BY_LANGUAGE: Readonly<Record<string, Locale>> = {
   en: "en-US",
   pt: "pt-BR",
   es: "es-ES",
@@ -36,15 +36,19 @@ export const isLocale = (value: unknown): value is Locale =>
 
 /**
  * The first of the browser's languages (`navigator.languages`, most wanted first) that we speak,
- * matched on the primary subtag; English when none is.
+ * matched on the primary subtag; `fallback` when none is: the language the page was baked in, so
+ * a visitor we cannot serve in their own keeps what they first saw. English unless said.
  */
-export function resolveLocale(languages: readonly string[] | null | undefined): Locale {
+export function resolveLocale(
+  languages: readonly string[] | null | undefined,
+  fallback: Locale = DEFAULT_LOCALE,
+): Locale {
   for (const tag of languages ?? []) {
     if (typeof tag !== "string") continue;
     const match = BY_LANGUAGE[tag.trim().toLowerCase().split(/[-_]/)[0]];
     if (match) return match;
   }
-  return DEFAULT_LOCALE;
+  return fallback;
 }
 
 /** "pt-BR" as Open Graph writes it: "pt_BR". */

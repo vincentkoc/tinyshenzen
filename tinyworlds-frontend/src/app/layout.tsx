@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
 import { Archivo, Tiny5 } from "next/font/google";
 import { Analytics } from "@/components/analytics";
+import { LocaleReady } from "@/components/locale-ready";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DICTIONARIES } from "@/i18n";
+import { localeScript } from "@/i18n/early";
 import { ogLocale } from "@/i18n/locale";
 import { PREFS_KEY } from "@/lib/prefs";
 import { HOME_CARD_PATH, SITE_ACCENT, SITE_HOME_LOCALE, SITE_ID, SITE_NAME } from "@/site";
@@ -27,7 +29,8 @@ const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-
 
 // What is baked into the HTML (title, description, share card, <html lang>) is in the site's
 // home language: crawlers and link previews do not run the page. Visitors get their own language
-// once it is running (useI18n), and the page then retitles the document to match.
+// once it is running (useI18n), and the page then retitles the document to match; the script in
+// <head> settles <html lang> before the first paint and keeps the page hidden until then.
 const trimmed = (value: string | undefined) => (value ?? "").trim().replace(/\/+$/, "");
 const siteUrl = trimmed(process.env.NEXT_PUBLIC_SITE_URL);
 const basePath = trimmed(process.env.NEXT_PUBLIC_BASE_PATH);
@@ -112,11 +115,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: localeScript(PREFS_KEY, SITE_HOME_LOCALE) }} />
       </head>
       <body>
         <TooltipProvider delayDuration={350}>{children}</TooltipProvider>
         <Toaster position="bottom-center" />
         <Analytics />
+        <LocaleReady />
       </body>
     </html>
   );

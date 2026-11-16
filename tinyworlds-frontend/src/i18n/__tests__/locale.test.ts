@@ -32,6 +32,12 @@ describe("resolveLocale", () => {
     expect(resolveLocale(["est", "pa-IN"])).toBe("en-US");
   });
 
+  it("falls back to the language it is told, the home language of the page", () => {
+    expect(resolveLocale(["fr-FR", "de"], "pt-BR")).toBe("pt-BR");
+    expect(resolveLocale([], "es-ES")).toBe("es-ES");
+    expect(resolveLocale(["zh-HK"], "pt-BR")).toBe("zh-CN");
+  });
+
   it("falls back to English", () => {
     expect(DEFAULT_LOCALE).toBe("en-US");
     expect(resolveLocale(["fr-FR", "de"])).toBe("en-US");

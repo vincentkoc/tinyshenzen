@@ -29,7 +29,9 @@ export const DICTIONARIES: Record<Locale, Strings> = {
 /**
  * The visitor's language, as an external store for React. The page is prerendered in the site's
  * home language, which is also what hydration sees; once running, the browser's own answer takes
- * over: the language chosen in the settings, or else the first of the browser's that we speak.
+ * over: the language chosen in the settings, or else the first of the browser's that we speak, or
+ * else the home language still. `localeScript` (early.ts) makes the same choice before the first
+ * paint.
  */
 export const localeStore = {
   subscribe(listener: () => void): () => void {
@@ -42,7 +44,7 @@ export const localeStore = {
   },
   getSnapshot(): Locale {
     const chosen = prefsStore.getSnapshot().lang;
-    return chosen === "auto" ? resolveLocale(navigator.languages) : chosen;
+    return chosen === "auto" ? resolveLocale(navigator.languages, SITE_HOME_LOCALE) : chosen;
   },
   getServerSnapshot(): Locale {
     return SITE_HOME_LOCALE;
