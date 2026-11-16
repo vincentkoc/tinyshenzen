@@ -21,6 +21,7 @@ Higher zoom levels are rebuilt after every pass.
 | 5 | `--polish-seams` | Feathers a tone jump across a z0 tile edge, and across a restyle-window hem when those windows are still on disk. Only the low-frequency colour is moved, and only where both sides are the same kind of surface, so a building cut or a river bank is not smeared. |
 | 6 | `--polish-tone` | Gives the whole restyle one house tone. Replaces step 5: it reads the tiles from before the seam blend. See [House tone](#house-tone). |
 | 7 | `--polish-gaps --gaps-backup DIR` | Fills holes inside the city: beige voids, ghostly veils, buildings cut off on a tile or window line, and blurry patches. See [Gaps](#gaps). |
+| 8 | `--polish-edges --edges-backup DIR` | Fixes the edge band and the district rims: content washed to white or cut off on a line, roads and motorways that stop dead, roads or bridges over open water. See [Edges](#edges). |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
 windows, `--polish-water` needs them for the district water masks, and
@@ -126,6 +127,51 @@ layout as `--out`) instead and leaves the map alone, for a review before
 copying it over. `--gaps-report DIR` writes `gaps.json`, a ranked list with
 the source used for each region, and `sheet.jpg`, the worst 40 as original,
 before and after.
+
+## Edges
+
+The gaps pass only looks deep inside the city. Around the outer edge of the
+restyle, and along each district's restyle rectangle, the restyle left
+half-baked work: forest and blocks washed toward white, content that stops on
+a straight tile or window line, motorways that end in the fog, roads drawn
+over open water. `--polish-edges` (see `lora/edges.py`) runs after the gaps
+pass:
+
+1. The audit zone is the vignette field above -860 px (everything that is not
+   deep city) plus 384 px either side of every district rectangle. The
+   original is palette art, so each pixel is classed exactly: blank ground,
+   water, the black fog dither, grey road, content.
+2. On the global 16-px grid, four scores: `veil` (the original draws content,
+   the restyle is fog-mixed against the house-styled original or lacks its
+   edges; classed `white`, `cutoff` on a tile or window line, or `veil`),
+   `road` (original road pixels the restyle no longer draws grey; `road-cut`
+   when the road continues next to it), `phantom` (textured grey road pixels
+   over open water or fog, 12 px from anything the original draws on land;
+   blank ground counts as land, since it is also piers, dykes and roofs) and
+   `ghost` (pale half-faded detail past the original's own edge, within 300 px
+   of the coverage edge). Regions are grouped with the gaps hysteresis.
+3. Fixes: `veil` from an intact restyle window, else the house-styled original
+   with its black dither removed, only where the original really draws
+   something; `road` from the house-styled original, on its road pixels only;
+   `phantom` inpainted from the surrounding restyle; `ghost` faded to the
+   viewer fog. Big regions are done in 1536-px blocks. Every fix fades out
+   over 96 px toward a z0 tile the map does not have, so nothing stops on a
+   straight tile edge.
+4. Each block is re-scored with its own measure; a fix that does not lower it
+   by 0.05 is dropped (`"source": "kept"`).
+
+```bash
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-edges \
+  --edges-backup /workspace/tinysz-core-z0-backup-edges --edges-report /tmp/edges-report
+```
+
+z0 tiles are copied to `DIR/0` before they change, and a re-run starts from
+those copies. `DIR/work` caches the cell fields, the house style and one file
+per fixed block, so an interrupted run picks up where it stopped; delete it
+after changing `edges.py`. `--edges-dry-run` writes only the report.
+`--edges-report DIR` writes `edges.json` (regions by kind, sources, scores
+before and after), `before.jpg` and `after.jpg`. Only the pyramid tiles above
+changed tiles are rebuilt; rerun `--web-tiles` afterwards.
 
 ## Spots file
 
