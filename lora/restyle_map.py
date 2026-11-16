@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -119,6 +120,55 @@ def select_tiles(
         i, n = shard
         return [t for k, t in enumerate(ts) if k % n == i]
     return list(ts)
+
+
+BUDGET_RESERVE = 0.07  # USD held per in-flight call (a 1024 medium edit bills ~$0.053, high ~$0.063)
+
+
+class Budget:
+    """A hard spend cap across calls, threads and runs.
+
+    Every billed call is appended to a ledger (jsonl, `usd` per row) under a
+    file lock; runs that share the ledger share the cap. A call starts only if
+    the ledger total plus `reserve` for each call in flight (this one
+    included) stays within the cap, so the cap holds even if every in-flight
+    call bills at the reserve. A successful call with no usage line is booked
+    at the reserve.
+    """
+
+    def __init__(self, cap: float, ledger: Path, reserve: float = BUDGET_RESERVE) -> None:
+        self.cap, self.ledger, self.reserve = float(cap), ledger, float(reserve)
+        self.inflight = 0
+        self.stopped = 0
+        self._lock = threading.Lock()
+
+    def spent(self) -> float:
+        if not self.ledger.exists():
+            return 0.0
+        total = 0.0
+        with self.ledger.open() as fh:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_SH)
+            try:
+                for line in fh:
+                    if line.strip():
+                        total += float(json.loads(line).get("usd") or 0.0)
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        return total
+
+    def acquire(self) -> bool:
+        with self._lock:
+            if self.spent() + (self.inflight + 1) * self.reserve > self.cap + 1e-9:
+                self.stopped += 1
+                return False
+            self.inflight += 1
+            return True
+
+    def release(self, usd: float | None, row: dict | None = None) -> None:
+        with self._lock:
+            self.inflight -= 1
+            if usd is not None:
+                append_jsonl(self.ledger, dict(row or {}, usd=float(usd)))
 
 
 def append_jsonl(path: Path, row: dict) -> None:
@@ -258,6 +308,10 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--no-skip-fog", action="store_true", help="also send near-empty fog windows to the API")
     ap.add_argument("--shard", default="", help="disjoint slice I/N (0-based, e.g. 0/8). Safe to share --out.")
     ap.add_argument("--windows", default="", help="explicit window origins: 'x,y;x,y'")
+    ap.add_argument("--budget-usd", type=float, default=0.0,
+                    help="hard spend cap in USD (0 = none): a call starts only if the ledger plus a reserve per in-flight call stays within it")
+    ap.add_argument("--budget-ledger", type=Path, default=None,
+                    help="with --budget-usd: jsonl of billed calls shared across runs (default OUT/budget.jsonl)")
     args = ap.parse_args(argv)
 
     meta = load_meta(args.chunks)
@@ -280,6 +334,10 @@ def main(argv: list[str] | None = None) -> None:
     )
 
     usage_path = args.out / "usage.jsonl"
+    budget = None
+    if args.budget_usd > 0:
+        budget = Budget(args.budget_usd, args.budget_ledger or (args.out / "budget.jsonl"))
+        print(f"  budget cap ${budget.cap:.2f}, already spent ${budget.spent():.4f}", flush=True)
 
     if args.count_only:
         fog = 0
@@ -336,7 +394,17 @@ def main(argv: list[str] | None = None) -> None:
                 if fog:
                     Image.open(src).convert("RGB").save(dest)
                     return {"skipped": True, "fog": True, "usd": 0.0, "calls": 0, "x": t.x, "y": t.y, "path": str(dest)}
-            result = restyle_one(src, dest, logs / f"{t.x}_{t.y}.log", args.look, quality=args.quality)
+            if budget is not None and not budget.acquire():
+                return {"skipped": True, "budget": True, "usd": 0.0, "calls": 0, "x": t.x, "y": t.y}
+            try:
+                result = restyle_one(src, dest, logs / f"{t.x}_{t.y}.log", args.look, quality=args.quality)
+            except BaseException:
+                if budget is not None:
+                    budget.release(None)
+                raise
+            if budget is not None:
+                billed = 0.0 if result.get("skipped") else (result.get("usd") or budget.reserve)
+                budget.release(billed, {"x": t.x, "y": t.y, "chunks": str(args.chunks)})
             if dest.exists() and not result.get("fog"):
                 with Image.open(src) as proc, Image.open(dest) as rest:
                     composite_dark_fog(proc, rest).save(dest)
@@ -364,6 +432,8 @@ def main(argv: list[str] | None = None) -> None:
                     flush=True,
                 )
 
+    if budget is not None and budget.stopped:
+        print(f"  budget: {budget.stopped} windows not started (cap ${budget.cap:.2f}, spent ${budget.spent():.4f})", flush=True)
     summary = rebuild_summary(usage_path)
     shard_name = f"summary-shard-{shard[0]}-of-{shard[1]}.json" if shard else "summary.json"
     (args.out / shard_name).write_text(json.dumps(summary, indent=2) + "\n")
