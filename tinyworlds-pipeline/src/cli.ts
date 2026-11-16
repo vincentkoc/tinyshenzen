@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { Command } from "commander";
+import fs from "node:fs";
 import path from "node:path";
 import sharp from "sharp";
 import { CITIES } from "./cities/index.js";
@@ -156,22 +157,48 @@ program
   .option("--overlap <n>", "feather hem in px", String(DEFAULT_OVERLAP))
   .option("--prompt <text>", "override the default Shenzhen isometric-pixel prompt")
   .option("--look <style>", "named prompt: habbo | pixelsg (Pixel-Singapore-inspired miniature)")
-  .option("--quality <level>", "OpenAI image quality: low | medium | high (default: high, or RESTYLE_QUALITY)")
-  .action(async (opts: { in: string; out?: string; window: string; overlap: string; prompt?: string; look?: string; quality?: string }) => {
-    const input = path.resolve(opts.in);
-    const parsed = path.parse(input);
-    const output = path.resolve(opts.out ?? path.join(parsed.dir, `${parsed.name}-restyled${parsed.ext}`));
-    const look = opts.look === "habbo" || opts.look === "pixelsg" ? opts.look : undefined;
-    const quality = resolveQuality(opts.quality);
-    await restyleImage({
-      input,
-      output,
-      window: Math.max(32, Math.round(Number(opts.window))),
-      overlap: Math.max(0, Math.round(Number(opts.overlap))),
-      prompt: opts.prompt,
-      look,
-      quality,
-    });
+  .option(
+    "--quality <level>",
+    "OpenAI image quality: low | medium | high (default: high, or RESTYLE_QUALITY)",
+  )
+  .action(
+    async (opts: {
+      in: string;
+      out?: string;
+      window: string;
+      overlap: string;
+      prompt?: string;
+      look?: string;
+      quality?: string;
+    }) => {
+      const input = path.resolve(opts.in);
+      const parsed = path.parse(input);
+      const output = path.resolve(opts.out ?? path.join(parsed.dir, `${parsed.name}-restyled${parsed.ext}`));
+      const look = opts.look === "habbo" || opts.look === "pixelsg" ? opts.look : undefined;
+      const quality = resolveQuality(opts.quality);
+      await restyleImage({
+        input,
+        output,
+        window: Math.max(32, Math.round(Number(opts.window))),
+        overlap: Math.max(0, Math.round(Number(opts.overlap))),
+        prompt: opts.prompt,
+        look,
+        quality,
+      });
+    },
+  );
+
+program
+  .command("coverage")
+  .description("Write the city's coverage outline as GeoJSON (for the tile passes in lora/)")
+  .requiredOption("--out <file>", "where to write it")
+  .action((opts: { out: string }) => {
+    if (!CITY.coverage) throw new Error(`${CITY.id} has no coverage outline`);
+    const geometry = { type: "MultiPolygon", coordinates: CITY.coverage };
+    fs.writeFileSync(
+      path.resolve(opts.out),
+      JSON.stringify({ type: "Feature", properties: {}, geometry }) + "\n",
+    );
   });
 
 program
