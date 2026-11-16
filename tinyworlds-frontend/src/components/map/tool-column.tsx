@@ -22,16 +22,44 @@ interface ToolButtonProps extends ComponentProps<"button"> {
   label: string;
   /** the key that does the same */
   hint?: string;
+  /** when set, the control is a link (Donate to GitHub Sponsors) instead of a button */
+  href?: string;
 }
 
-function ToolButton({ label, hint, className, children, ...props }: ToolButtonProps) {
+function ToolButton({
+  label,
+  hint,
+  className,
+  children,
+  href,
+  onClick,
+  ...props
+}: ToolButtonProps) {
+  const control = href ? (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={label}
+      className={cn("bullet", className)}
+      {...(props as ComponentProps<"a">)}
+    >
+      {children}
+    </a>
+  ) : (
+    <button
+      type="button"
+      aria-label={label}
+      className={cn("bullet", className)}
+      onClick={onClick}
+      {...props}
+    >
+      {children}
+    </button>
+  );
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button type="button" aria-label={label} className={cn("bullet", className)} {...props}>
-          {children}
-        </button>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{control}</TooltipTrigger>
       <TooltipContent side="left" sideOffset={10}>
         {label}
         {hint && (
@@ -58,6 +86,8 @@ interface ToolColumnProps {
   onAbout: () => void;
   /** absent when this build takes no donations: then there is no heart */
   onDonate?: () => void;
+  /** a GitHub Sponsors address, used when there is no checkout dialog to open */
+  donateHref?: string;
   settingsOpen: boolean;
   onSettingsOpenChange: (open: boolean) => void;
   /** the settings panel's contents */
@@ -76,6 +106,7 @@ export function ToolColumn({
   onShare,
   onAbout,
   onDonate,
+  donateHref,
   settingsOpen,
   onSettingsOpenChange,
   settings,
@@ -135,12 +166,13 @@ export function ToolColumn({
       <ToolButton label={t.tools.about} onClick={onAbout}>
         <Info {...icon} />
       </ToolButton>
-      {onDonate && (
+      {(onDonate || donateHref) && (
         <>
           <Rule />
           <ToolButton
             label={t.tools.donate}
             onClick={onDonate}
+            href={donateHref}
             data-rybbit-event="donate_open"
             data-rybbit-prop-world={SITE_ID}
           >

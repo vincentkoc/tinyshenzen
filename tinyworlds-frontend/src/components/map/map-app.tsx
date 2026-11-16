@@ -15,7 +15,7 @@ import {
   usePresence,
 } from "@/hooks/use-site-effects";
 import { useTheme } from "@/hooks/use-theme";
-import { API_URL, paymentLinkFor } from "@/lib/donate";
+import { donateAction } from "@/lib/donate";
 import { prefsStore } from "@/lib/prefs";
 import { quizKey } from "@/lib/quiz";
 import { cn } from "@/lib/utils";
@@ -98,8 +98,10 @@ export function MapApp() {
   useDonationReturn();
   useFunnelVisit();
   usePresence();
-  // donations are taken when the build names an API or a checkout for this language
-  const takesDonations = API_URL !== "" || paymentLinkFor(locale, WORLD.id) !== null;
+  // a Stripe/API checkout when the build names one; otherwise Donate goes to GitHub Sponsors
+  const donate = donateAction(locale, WORLD.id);
+  const takesDonations = donate.kind === "checkout";
+  const donateHref = donate.kind === "sponsor" ? donate.url : undefined;
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
   const compact = useMediaQuery("(max-width: 639px)");
   // Guess the building's card is a sheet at the foot of the screen until it fits beside the search
@@ -500,6 +502,7 @@ export function MapApp() {
                   }
                 : undefined
             }
+            donateHref={donateHref}
             settingsOpen={settingsOpen}
             onSettingsOpenChange={setSettingsOpen}
             settings={
@@ -546,6 +549,7 @@ export function MapApp() {
               }
             : undefined
         }
+        donateHref={donateHref}
         onBecome={
           takesDonations
             ? (cityName) => {
