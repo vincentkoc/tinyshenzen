@@ -5353,6 +5353,26 @@ def write_overview(image: Image.Image, dest: Path, max_width: int = 2048) -> dic
     return {"src": "overview.webp", "width": pw, "height": ph}
 
 
+def run_polish_coverage(args, grid: dict, dest: Path, proc_dest: Path | None, geo: dict) -> set[tuple[int, int]]:
+    """--polish-coverage: fade the restyle and procedural z0 tiles along the outline, rebuild the
+    procedural pyramid here, and return the restyle's z0 set (its pyramid is rebuilt by the caller)."""
+    import coverage as CV
+
+    outline = CV.Outline(CV.project_rings(CV.load_rings(args.polish_coverage), geo, (grid["ox"], grid["oy"])))
+    lossless = lambda im, path: _atomic_save_webp(im, path, lossless=True)  # noqa: E731
+    common = dict(fog=VIEW_FOG, noise=fade_boundary_noise, almost_empty=_almost_empty, tile=TILE)
+    present, _, _ = CV.polish_coverage(dest, grid, outline, backup=args.coverage_backup / dest.name,
+                                       save=lossless, **common)
+    if proc_dest is not None:
+        lossy = lambda im, path: _atomic_save_webp(im, path, lossless=False)  # noqa: E731
+        proc_present, changed, dropped = CV.polish_coverage(
+            proc_dest, grid, outline, backup=args.coverage_backup / proc_dest.name, save=lossy, **common)
+        if changed or dropped:
+            _pyramid_from_z0(proc_dest, grid, {0: proc_present}, pad_rgb=(0x1A, 0x1E, 0x1C))
+            print(f"  procedural pyramid rebuilt from {len(proc_present)} z0 tiles", flush=True)
+    return present
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--image", type=Path, default=Path("/workspace/tinyshenzhen-futian-restyled.png"))
@@ -5420,6 +5440,16 @@ def main() -> None:
                     help="with --polish-redraw (required): z0 copies before change; re-runs start from them")
     ap.add_argument("--redraw-report", type=Path, default=None, metavar="DIR",
                     help="with --polish-redraw: write redraw.json and sheet.jpg (original, before, after)")
+    ap.add_argument(
+        "--polish-coverage",
+        type=Path,
+        default=None,
+        metavar="GEOJSON",
+        help="fade every layer's z0 tiles to the viewer fog along a coverage outline and drop tiles left blank "
+             "(see coverage.py); needs --coverage-backup. Run after the other polish passes, before --web-tiles",
+    )
+    ap.add_argument("--coverage-backup", type=Path, default=None, metavar="DIR",
+                    help="with --polish-coverage (required): originals of changed or dropped z0 tiles, per layer")
     ap.add_argument(
         "--polish-fogline",
         action="store_true",
@@ -5614,7 +5644,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.polish_edges or args.polish_redraw or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.polish_edges or args.polish_redraw or args.polish_coverage or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -5727,6 +5757,10 @@ def main() -> None:
                 )
                 if args.tone_out is not None:
                     return
+        elif args.polish_coverage:
+            if args.coverage_backup is None:
+                raise SystemExit("--polish-coverage needs --coverage-backup DIR")
+            z0_present = run_polish_coverage(args, grid, dest, proc_dest, world_geo)
         elif args.polish_fogline:
             fade = args.fade if args.fade is not None else VIGNETTE_FADE
             print(f"  fog boundary cleanup → {dest}", flush=True)
