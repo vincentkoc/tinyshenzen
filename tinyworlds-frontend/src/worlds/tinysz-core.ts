@@ -20,6 +20,7 @@ export const tinyszCore: World = {
         notes: [
           "Building heights come from the map data, or from the number of floors where a height is missing. Where the data is wrong, so is the map.",
           "The map is turned so Futian's street grid runs along the pixels. North on the compass points up and to the right.",
+          "Artwork, not a survey map.",
         ],
       },
       hoodLines: { label: "Neighborhood lines", inSentence: "neighborhood lines" },
@@ -42,6 +43,7 @@ export const tinyszCore: World = {
         notes: [
           "As alturas dos prédios vêm dos dados do mapa, ou do número de andares quando a altura não está marcada. Onde o dado está errado, o mapa também está.",
           "O mapa está girado para que as ruas de Futian corram ao longo dos pixels. O norte da bússola aponta para cima e para a direita.",
+          "Uma obra de arte, não um mapa topográfico.",
         ],
       },
       hoodLines: { label: "Linhas dos bairros", inSentence: "as linhas dos bairros" },
@@ -65,6 +67,7 @@ export const tinyszCore: World = {
         notes: [
           "Las alturas de los edificios salen de los datos del mapa, o del número de plantas cuando falta la altura. Donde el dato está mal, el mapa también.",
           "El mapa está girado para que las calles de Futian sigan los píxeles. El norte de la brújula apunta arriba y a la derecha.",
+          "Una obra artística, no un mapa topográfico.",
         ],
       },
       hoodLines: { label: "Límites de barrios", inSentence: "los límites de los barrios" },
@@ -88,6 +91,7 @@ export const tinyszCore: World = {
         notes: [
           "建筑高度来自地图数据；缺少高度时，按楼层数推算。数据有误的地方，地图也会跟着出错。",
           "地图经过旋转，让福田的路网沿着像素排列。指南针上的北方指向右上方。",
+          "艺术作品，非测绘地图。",
         ],
       },
       hoodLines: { label: "街区界线", inSentence: "街区界线" },
