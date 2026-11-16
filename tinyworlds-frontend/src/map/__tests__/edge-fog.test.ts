@@ -20,18 +20,20 @@ describe("edgeFog", () => {
   });
 
   it("fades in, then reaches further the further out you zoom", () => {
-    const near = edgeFog(0.4, 0.01);
+    const near = edgeFog(0.8, 0.01);
     expect(near.opacity).toBeGreaterThan(0);
     expect(near.opacity).toBeLessThan(1);
     expect(edgeFog(FOG_FULL, 0.01).opacity).toBe(1);
     let last = 0;
-    for (const scale of [0.45, 0.3, 0.1, 0.03, 0.01]) {
+    for (const scale of [0.9, 0.6, 0.3, 0.1, 0.03, 0.01]) {
       const { reach } = edgeFog(scale, 0.01);
       expect(reach).toBeGreaterThan(last);
       last = reach;
     }
     expect(edgeFog(0.01, 0.01).reach).toBeCloseTo(FOG_REACH_FAR);
-    expect(edgeFog(0.499, 0.01).reach).toBeCloseTo(FOG_REACH_NEAR, 0);
+    expect(edgeFog(FOG_FROM * 0.999, 0.01).reach).toBeCloseTo(FOG_REACH_NEAR, 0);
+    // full strength wherever a coarser level (with its baked-in fill) is drawn
+    expect(edgeFog(0.3, 0.01).opacity).toBe(1);
   });
 
   it("is off for a nonsense scale", () => {

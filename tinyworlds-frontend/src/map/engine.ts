@@ -962,7 +962,17 @@ export class MapEngine {
     ctx.globalAlpha = fog.opacity;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "medium";
-    ctx.drawImage(mask.canvas, dx, dy, mask.canvas.width * cell * s, mask.canvas.height * cell * s);
+    const dw = Math.round(mask.canvas.width * cell * s);
+    const dh = Math.round(mask.canvas.height * cell * s);
+    ctx.drawImage(mask.canvas, dx, dy, dw, dh);
+    // coarse tiles reach past the finest grid: paper over whatever they hold out there
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    ctx.fillStyle = this.paper;
+    if (dy > 0) ctx.fillRect(0, 0, W, dy);
+    if (dy + dh < H) ctx.fillRect(0, dy + dh, W, H - dy - dh);
+    if (dx > 0) ctx.fillRect(0, dy, dx, dh);
+    if (dx + dw < W) ctx.fillRect(dx + dw, dy, W - dx - dw, dh);
     ctx.restore();
   }
 

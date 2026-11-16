@@ -9,10 +9,13 @@
 /** The fog baked into the tiles' empty edges (and the stylesheet's --fog): a warm off-white. */
 export const DEFAULT_PAPER = "#e9e6df";
 
-/** Above this scale (screen px per map px) the tile edges are left as they are. */
-export const FOG_FROM = 0.5;
-/** By this scale the edge fog is at full strength. */
-export const FOG_FULL = 0.25;
+/** From this scale (screen px per map px) up, native tiles are drawn and their edges left alone. */
+export const FOG_FROM = 1;
+/**
+ * By this scale the edge fog is at full strength: the first scale that draws a coarser level,
+ * whose tiles bake in whatever fills their missing children (fog, or dark in procedural sets).
+ */
+export const FOG_FULL = 0.5;
 /** How far, in CSS px, the fog reaches into the map: just zoomed out, and fully zoomed out. */
 export const FOG_REACH_NEAR = 10;
 export const FOG_REACH_FAR = 56;
