@@ -4849,7 +4849,7 @@ def write_overview(image: Image.Image, dest: Path, max_width: int = 2048) -> dic
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--image", type=Path, default=Path("/workspace/tinyshenzen-futian-restyled.png"))
+    ap.add_argument("--image", type=Path, default=Path("/workspace/tinyshenzhen-futian-restyled.png"))
     ap.add_argument("--chunks", type=Path, default=Path("/workspace/tinysz-futian"))
     ap.add_argument(
         "--out",
