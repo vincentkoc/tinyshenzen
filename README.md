@@ -4,6 +4,8 @@
 
 **An isometric pixel-art map of Shenzhen you can pan and zoom, from Shekou to Luohu Port.**
 
+Built on [Tiny Worlds](https://github.com/nihey/tinyworlds) by [nihey](https://github.com/nihey).
+
 Built from open data. Drawn in a fine miniature style inspired by Pixel Singapore.
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -24,8 +26,8 @@ Built from open data. Drawn in a fine miniature style inspired by Pixel Singapor
 
 <br>
 
-Tiny Shenzhen is adapted from [nihey/tinyworlds](https://github.com/nihey/tinyworlds). It keeps the
-same pipeline and viewer, and adds a Shenzhen city definition and style. Nothing is drawn by hand.
+It keeps the same pipeline and viewer, and adds a Shenzhen city definition and style. Nothing is
+drawn by hand.
 
 ## Features
 
