@@ -8,7 +8,7 @@ import {
 } from "./manifest";
 
 import { activeStrings } from "@/i18n";
-import type { Locale } from "@/i18n/locale";
+import { DEFAULT_LOCALE, type Locale } from "@/i18n/locale";
 import { WORLD } from "@/worlds";
 import type { Flight, LifeFile } from "./life";
 import { parseSights, parseSightTexts, type Sight, type SightTexts } from "./sights";
@@ -108,22 +108,37 @@ export async function loadSights(build: string, signal?: AbortSignal): Promise<S
   return parseSights(await getOptionalJson(dataUrl("sights.json", build), signal));
 }
 
-/** What Wikipedia says of the sights, in one interface language. None when the file is missing. */
+/**
+ * A data file written once per interface language (`sights.pt-BR.json`). A language the data set
+ * was built without (a newer one than the data) reads the English file rather than nothing.
+ */
+async function getLocalizedJson(
+  name: string,
+  build: string,
+  locale: Locale,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const own = await getOptionalJson(dataUrl(`${name}.${locale}.json`, build), signal);
+  if (own !== null || locale === DEFAULT_LOCALE) return own;
+  return getOptionalJson(dataUrl(`${name}.${DEFAULT_LOCALE}.json`, build), signal);
+}
+
+/** What Wikipedia says of the sights, in one interface language (else English). None when missing. */
 export async function loadSightTexts(
   build: string,
   locale: Locale,
   signal?: AbortSignal,
 ): Promise<SightTexts> {
-  return parseSightTexts(await getOptionalJson(dataUrl(`sights.${locale}.json`, build), signal));
+  return parseSightTexts(await getLocalizedJson("sights", build, locale, signal));
 }
 
-/** Guess the building's questions in one interface language. None when the file is missing. */
+/** Guess the building's questions in one interface language (else English). None when missing. */
 export async function loadQuiz(
   build: string,
   locale: Locale,
   signal?: AbortSignal,
 ): Promise<QuizQuestion[]> {
-  return parseQuiz(await getOptionalJson(dataUrl(`quiz.${locale}.json`, build), signal));
+  return parseQuiz(await getLocalizedJson("quiz", build, locale, signal));
 }
 
 export async function loadHoods(build: string, signal?: AbortSignal): Promise<Hood[]> {
