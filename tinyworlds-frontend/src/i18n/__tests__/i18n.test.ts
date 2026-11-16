@@ -26,6 +26,13 @@ describe("dictionaries", () => {
     }
   });
 
+  it("credits Vincent Koc in every language", () => {
+    for (const [locale, dictionary] of Object.entries(DICTIONARIES)) {
+      expect(dictionary.about.madeBy, locale).toMatch(/Vincent Koc/);
+      expect(dictionary.credit.madeBy, locale).toMatch(/Vincent Koc/);
+    }
+  });
+
   it("tell someone with nothing on their page that gifts go by the email they signed in with", () => {
     // a donor who gave under another address must not think the gift is lost
     for (const [locale, dictionary] of Object.entries(DICTIONARIES))

@@ -51,6 +51,7 @@ export const esES: Strings = {
     allCities: "Todas las ciudades",
     openSource: "Código abierto en GitHub",
     contact: "Contacto",
+    madeBy: "Hecho por Vincent Koc",
   },
   home: {
     title: "tinyworlds · ciudades enteras, en miniatura",
@@ -298,6 +299,7 @@ export const esES: Strings = {
     east: "E",
     west: "O",
     decimal: ",",
+    madeBy: "por Vincent Koc",
   },
   dialog: { close: "Cerrar" },
   explore: { more: "{n} ciudades y mundos más por explorar" },

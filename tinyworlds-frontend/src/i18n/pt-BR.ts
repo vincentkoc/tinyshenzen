@@ -52,6 +52,7 @@ export const ptBR: Strings = {
     allCities: "Todas as cidades",
     openSource: "Código aberto no GitHub",
     contact: "Contato",
+    madeBy: "Feito por Vincent Koc",
   },
   home: {
     title: "tinyworlds · cidades inteiras, em miniatura",
@@ -298,6 +299,7 @@ export const ptBR: Strings = {
     east: "L",
     west: "O",
     decimal: ",",
+    madeBy: "por Vincent Koc",
   },
   dialog: { close: "Fechar" },
   explore: { more: "Mais {n} cidades e mundos para explorar" },

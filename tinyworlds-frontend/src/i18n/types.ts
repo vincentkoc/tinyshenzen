@@ -87,6 +87,8 @@ export interface Strings {
     allCities: string;
     openSource: string;
     contact: string;
+    /** the author credit, as a link: "Made by Vincent Koc" */
+    madeBy: string;
   };
   /** The front page that lists the worlds. `title` and `description` are the page's metadata. */
   home: {
@@ -379,6 +381,8 @@ export interface Strings {
     west: string;
     /** decimal mark in the coordinates readout */
     decimal: string;
+    /** a short author credit in the corner of the map: "by Vincent Koc" */
+    madeBy: string;
   };
   dialog: { close: string };
   /** On a map: the invitation to the site's other places. "{n}" is how many there are. */
