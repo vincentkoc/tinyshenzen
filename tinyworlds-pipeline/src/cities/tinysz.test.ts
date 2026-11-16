@@ -16,6 +16,8 @@ import {
   tinyszLuohu,
   tinyszNanshan,
 } from "./tinysz.js";
+import { coverageTest } from "../geom/coverage.js";
+import { CURATED } from "./tinysz.places.js";
 
 const inside = (
   bbox: { west: number; south: number; east: number; north: number },
@@ -150,5 +152,18 @@ describe("life on the map", () => {
 
     expect(tinyszFull.boats).toEqual(tinyszCore.boats);
     expect(tinyszFull.flights).toEqual(tinyszCore.flights);
+  });
+
+  it("stays inside its coverage outline", () => {
+    const covered = coverageTest(tinyszCore.coverage);
+    for (const world of [tinysz, tinyszNanshan, tinyszLuohu, tinyszCore, tinyszFull])
+      expect(world.coverage).toBe(tinyszCore.coverage);
+    for (const point of [CENTER, HOUHAI, CAIWUWEI, { lon: 113.913, lat: 22.485 }])
+      expect(covered(point.lon, point.lat)).toBe(true);
+    // points just past the south edge of the core map
+    expect(covered(114.128, 22.502)).toBe(false);
+    expect(covered(114.079, 22.522)).toBe(false);
+    expect(covered(114.006, 22.467)).toBe(false);
+    for (const place of CURATED) expect(covered(place.lon, place.lat), place.n).toBe(true);
   });
 });

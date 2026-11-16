@@ -5,6 +5,8 @@ import { cnbh } from "../sources/cnbh.js";
 import { globfp } from "../sources/globfp.js";
 import { overture } from "../sources/overture.js";
 import { overtureAreas } from "../sources/overtureAreas.js";
+import { coverageTest } from "../geom/coverage.js";
+import { COVERAGE } from "./tinysz.coverage.js";
 import { HEIGHT_FIXES, LANDMARKS } from "./tinysz.landmarks.js";
 import { CURATED } from "./tinysz.places.js";
 import type { Areas, City } from "./types.js";
@@ -42,8 +44,10 @@ export const HOUHAI = { lon: 113.94167, lat: 22.51694 };
 /** KK100 in Caiwuwei, a natural start for the Luohu box. */
 export const CAIWUWEI = { lon: 114.10194, lat: 22.54667 };
 
+const covered = coverageTest(COVERAGE);
+
 const inside = (bbox: City["bbox"], lon: number, lat: number): boolean =>
-  lon >= bbox.west && lon <= bbox.east && lat >= bbox.south && lat <= bbox.north;
+  lon >= bbox.west && lon <= bbox.east && lat >= bbox.south && lat <= bbox.north && covered(lon, lat);
 
 /**
  * Boats and flights the data has no route for. Overture has no water segments on these maps,
@@ -52,15 +56,15 @@ const inside = (bbox: City["bbox"], lon: number, lat: number): boolean =>
  */
 const BOATS: NonNullable<City["boats"]> = [
   {
-    // from Shekou Port out east across Shenzhen Bay, short of the mangrove shore
+    // from Shekou Port out east across Shenzhen Bay, bending up toward the bay park
     name: "Shekou ferry",
     path: [
       [113.913, 22.478],
-      [113.925, 22.477],
-      [113.94, 22.477],
-      [113.955, 22.478],
-      [113.968, 22.48],
-      [113.978, 22.481],
+      [113.925, 22.478],
+      [113.938, 22.48],
+      [113.95, 22.484],
+      [113.96, 22.49],
+      [113.968, 22.496],
     ],
   },
   {
@@ -167,6 +171,7 @@ function shenzhen(spec: {
     betaDeg: 0,
     k: 2,
     bbox: spec.bbox,
+    coverage: COVERAGE,
     start: spec.start ?? { ...CENTER, scale: 0.85 },
     maxScale: 3,
     attribution: [

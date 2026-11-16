@@ -129,6 +129,11 @@ export interface City {
   k: number;
   /** Everything fetched and drawn lies inside this box; the fog decides what is actually kept. */
   bbox: { west: number; south: number; east: number; north: number };
+  /**
+   * An optional outline inside the box. The fog treats everything outside it as off the map, so
+   * renders fade out along it, and the index lists nothing beyond it.
+   */
+  coverage?: Polygons;
   /** Opening view. */
   start: { lon: number; lat: number; scale: number };
   maxScale: number;
