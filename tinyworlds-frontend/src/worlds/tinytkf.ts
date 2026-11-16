@@ -77,6 +77,28 @@ export const tinytkf: World = {
       searchPlaceholder: "Buscar en Truckee",
       splash: "Esperando al California Zephyr…",
     },
+    "zh-CN": {
+      city: "特拉基",
+      card: "商业街、火车站、唐纳湖和松林。",
+      title: "tinytkf · 口袋里的特拉基",
+      description:
+        "用开放数据生成的等距像素风加州特拉基微缩模型：商业街和火车站、老监狱和特拉基河、唐纳湖和唐纳纪念州立公园里的拓荒者纪念碑、松林中的塔霍唐纳、格伦夏尔，以及马蒂斯谷里的机场。拖动、缩放，搜索整个小镇。",
+      cardAlt: "以等距像素画绘制的特拉基商业街和唐纳湖",
+      tagline: "口袋里的特拉基",
+      about: {
+        intro:
+          "等距像素风的特拉基微缩模型：这座老铁路小镇的商业街隔着铁轨面对火车站，下方是特拉基河；唐纳湖和湖东端带拓荒者纪念碑的州立公园、松林中塔霍唐纳的房屋、格伦夏尔，以及马蒂斯谷里的机场。没有人手绘它：每一个街区、每一栋房屋、每一条道路和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "将近九成的建筑在地图数据中有高度，而这些高度全部是机器学习模型（微软的）根据航拍图像估算的，而不是实测的；其余的按规则设为普通高度。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让市中心沿铁路延伸的街道沿着像素排列。因此指南针上的北方并不朝向正上方。群山体现在道路上，而不在地面上：地图是平的。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "镇",
+      mapLabel: "特拉基的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索特拉基",
+      splash: "正在等加州和风号列车…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the green of the pines round Donner Lake, lit up enough to read on the signs

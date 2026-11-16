@@ -118,7 +118,17 @@ describe("the legal pages", () => {
     expect(updatedOn("2026-11-11", "en-US")).toBe("November 11, 2026");
     expect(updatedOn("2026-11-11", "pt-BR")).toBe("11 de novembro de 2026");
     expect(updatedOn("2026-11-11", "es-ES")).toBe("11 de noviembre de 2026");
+    expect(updatedOn("2026-11-11", "zh-CN")).toBe("2026年11月11日");
     expect(LEGAL_UPDATED).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it("say in every language that the English text prevails, and name every translation", () => {
+    for (const docs of Object.values(LEGAL)) {
+      const said = (locale: (typeof LOCALES)[number]) =>
+        docs[locale].sections.flatMap((s) => s.blocks).join(" ");
+      expect(said("en-US")).toMatch(/Portuguese, Spanish and Simplified Chinese/);
+      expect(said("zh-CN")).toMatch(/以英文文本为准/);
+    }
   });
 
   it("say the date in a sentence of every language", () => {

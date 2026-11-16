@@ -76,6 +76,28 @@ export const tinykingslanding: World = {
       searchPlaceholder: "Buscar en Desembarco del Rey",
       splash: "Levantando las murallas…",
     },
+    "zh-CN": {
+      city: "君临城",
+      card: "海湾边有城墙环绕的王都。",
+      title: "tinykingslanding · 口袋里的君临城",
+      description:
+        "等距像素风的君临城微缩模型：海湾边有城墙环绕的王都，有红堡、大圣堂、龙穴和跳蚤窝。一张由代码生成的粉丝自制地图。拖动、缩放，四处看看。",
+      cardAlt: "以等距像素画绘制的君临城和红堡",
+      tagline: "口袋里的君临城",
+      about: {
+        intro:
+          "等距像素风的君临城微缩模型：海湾边有城墙环绕的王都，有红堡、大圣堂、龙穴和跳蚤窝。没有人手绘它：每一段城墙、每一座塔楼、每一片屋顶和每一条小巷，都是用代码生成的。",
+        notes: [
+          "这是一个非官方的粉丝自制微缩模型，与乔治·R·R·马丁（George R. R. Martin）及 HBO 没有任何关联，也未获得其认可。",
+          "布局是为这张地图虚构的，由代码生成，并非取自任何官方地图。地名来自原著，但每个地方在这里的位置只是猜测。",
+        ],
+      },
+      hoodLines: { label: "城区", inSentence: "城区" },
+      borough: "城区",
+      mapLabel: "君临城的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索君临城",
+      splash: "正在筑起城墙…",
+    },
   },
   // never shown: a made-up place has no data to credit (the corner says "fan-made" in the visitor's language)
   credit: "Fan-made · invented map",

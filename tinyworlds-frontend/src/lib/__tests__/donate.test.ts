@@ -27,7 +27,7 @@ import {
 } from "../donate";
 
 const LINK = "https://donate.stripe.com/test_example";
-const NO_LINKS = { "en-US": "", "pt-BR": "", "es-ES": "" };
+const NO_LINKS = { "en-US": "", "pt-BR": "", "es-ES": "", "zh-CN": "" };
 
 describe("donateUrl", () => {
   it("says which world sent the donor and which language to speak", () => {
@@ -38,6 +38,7 @@ describe("donateUrl", () => {
       `${LINK}?client_reference_id=tinyrao&locale=pt-BR`,
     );
     expect(donateUrl(LINK, "home", "es-ES")).toBe(`${LINK}?client_reference_id=home&locale=es`);
+    expect(donateUrl(LINK, "tinysz", "zh-CN")).toBe(`${LINK}?client_reference_id=tinysz&locale=zh`);
   });
 
   it("keeps what the link already carries, and does not repeat its own parameters", () => {
@@ -65,7 +66,7 @@ describe("donateUrl", () => {
 });
 
 describe("paymentLinkFor", () => {
-  const links = { "en-US": `${LINK}_en`, "pt-BR": `${LINK}_pt`, "es-ES": "" };
+  const links = { "en-US": `${LINK}_en`, "pt-BR": `${LINK}_pt`, "es-ES": "", "zh-CN": "" };
 
   it("uses the language's own link", () => {
     expect(paymentLinkFor("pt-BR", "tinyrao", links)).toBe(
@@ -152,6 +153,7 @@ describe("formatUsd", () => {
     expect(formatUsd(10000, "en-US")).toBe("$100");
     expect(formatUsd(3500, "pt-BR").replace(/\s/g, " ")).toBe("US$ 35");
     expect(formatUsd(3500, "es-ES").replace(/\s/g, " ")).toBe("35 US$");
+    expect(formatUsd(3500, "zh-CN")).toBe("US$35");
     // cents are rounded away, not shown
     expect(formatUsd(3549, "en-US")).toBe("$35");
   });

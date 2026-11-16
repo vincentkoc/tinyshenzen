@@ -117,71 +117,84 @@ describe("worlds", () => {
       "Borough",
       "Distrito",
       "Distrito",
+      "行政区",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyrao.copy[locale].borough)).toEqual([
       "Region",
       "Região",
       "Región",
+      "区域",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyrao.copy[locale].hoodLines.label)).toEqual([
       "Sub-sectors",
       "Subsetores",
       "Subsectores",
+      "分区",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinynyc.copy[locale].hoodLines.label)).toEqual([
       "Neighbourhood lines",
       "Linhas dos bairros",
       "Límites de barrios",
+      "街区界线",
     ]);
     // Orlando's districts are the municipalities around it
     expect(LOCALES.map((locale) => WORLDS.tinyorl.copy[locale].borough)).toEqual([
       "City",
       "Cidade",
       "Ciudad",
+      "城市",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyorl.copy[locale].hoodLines.label)).toEqual([
       "Neighborhood lines",
       "Linhas dos bairros",
       "Límites de barrios",
+      "街区界线",
     ]);
     // a town has parts, a Spanish city has districts
     expect(LOCALES.map((locale) => WORLDS.tinyfte.copy[locale].borough)).toEqual([
       "Area",
       "Zona",
       "Zona",
+      "区域",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyvlc.copy[locale].borough)).toEqual([
       "District",
       "Distrito",
       "Distrito",
+      "区",
     ]);
     for (const id of ["tinyfte", "tinyvlc"])
       expect(LOCALES.map((locale) => WORLDS[id].copy[locale].hoodLines.label)).toEqual([
         "Neighbourhood lines",
         "Linhas dos bairros",
         "Límites de barrios",
+        "街区界线",
       ]);
     // Las Vegas' districts are the municipalities of the valley, as in Orlando
     expect(LOCALES.map((locale) => WORLDS.tinylas.copy[locale].borough)).toEqual([
       "City",
       "Cidade",
       "Ciudad",
+      "城市",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinylas.copy[locale].hoodLines.label)).toEqual([
       "Neighborhood lines",
       "Linhas dos bairros",
       "Límites de barrios",
+      "街区界线",
     ]);
     // Los Angeles' districts are the cities of the basin; its outlines, the communities
     expect(LOCALES.map((locale) => WORLDS.tinylax.copy[locale].borough)).toEqual([
       "City",
       "Cidade",
       "Ciudad",
+      "城市",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinylax.copy[locale].hoodLines.label)).toEqual([
       "Neighborhood lines",
       "Linhas dos bairros",
       "Límites de barrios",
+      "街区界线",
     ]);
     // Dallas' and Cincinnati's districts are the cities on the map (Highland Park; Covington and
     // Newport across the river); Pittsburgh's, Philadelphia's and Colorado Springs' are their parts
@@ -190,13 +203,14 @@ describe("worlds", () => {
     for (const id of ["tinydal", "tinycvg", "tinypit", "tinyphl", "tinycos"]) {
       expect(LOCALES.map((locale) => WORLDS[id].copy[locale].borough)).toEqual(
         id === "tinydal" || id === "tinycvg"
-          ? ["City", "Cidade", "Ciudad"]
-          : ["Area", "Região", "Zona"],
+          ? ["City", "Cidade", "Ciudad", "城市"]
+          : ["Area", "Região", "Zona", "区域"],
       );
       expect(LOCALES.map((locale) => WORLDS[id].copy[locale].hoodLines.label)).toEqual([
         "Neighborhood lines",
         "Linhas dos bairros",
         "Límites de barrios",
+        "街区界线",
       ]);
     }
     // Truckee's one district is the town itself, and it outlines nothing
@@ -204,23 +218,27 @@ describe("worlds", () => {
       "Town",
       "Município",
       "Municipio",
+      "镇",
     ]);
     // a castle has areas, a walled capital has quarters; both are outlined as districts
     expect(LOCALES.map((locale) => WORLDS.tinywinterfell.copy[locale].borough)).toEqual([
       "Area",
       "Área",
       "Zona",
+      "区域",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinykingslanding.copy[locale].borough)).toEqual([
       "Quarter",
       "Bairro",
       "Barrio",
+      "城区",
     ]);
     for (const id of ["tinywinterfell", "tinykingslanding"])
       expect(LOCALES.map((locale) => WORLDS[id].copy[locale].hoodLines.label)).toEqual([
         "Districts",
         "Distritos",
         "Distritos",
+        "城区",
       ]);
   });
 
@@ -240,7 +258,7 @@ describe("worlds", () => {
         expect(said, `${world.id} ${locale}`).toMatch(/HBO/);
         // nothing here comes from open data, and nothing may claim it does
         expect(`${said} ${description}`, `${world.id} ${locale}`).not.toMatch(
-          /open data|dados abertos|datos abiertos|OpenStreetMap/i,
+          /open data|dados abertos|datos abiertos|开放数据|OpenStreetMap/i,
         );
       }
       expect(world.copy["en-US"].about.notes[0]).toMatch(/unofficial, fan-made/);
@@ -257,26 +275,31 @@ describe("worlds", () => {
       "King's Landing",
       "Porto Real",
       "Desembarco del Rey",
+      "君临城",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinylas.copy[locale].tagline)).toEqual([
       "Las Vegas, pocket-sized",
       "Las Vegas, em miniatura",
       "Las Vegas, en miniatura",
+      "口袋里的拉斯维加斯",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinylax.copy[locale].city)).toEqual([
       "Los Angeles",
       "Los Angeles",
       "Los Ángeles",
+      "洛杉矶",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyvlc.copy[locale].city)).toEqual([
       "Valencia",
       "Valência",
       "Valencia",
+      "瓦伦西亚",
     ]);
     expect(LOCALES.map((locale) => WORLDS.tinyfte.copy[locale].tagline)).toEqual([
       "El Calafate, pocket-sized",
       "El Calafate, em miniatura",
       "El Calafate, en miniatura",
+      "口袋里的埃尔卡拉法特",
     ]);
   });
 

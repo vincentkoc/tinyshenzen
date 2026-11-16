@@ -76,6 +76,28 @@ export const tinyvlc: World = {
       searchPlaceholder: "Buscar em Valência",
       splash: "Plantando as laranjeiras…",
     },
+    "zh-CN": {
+      city: "瓦伦西亚",
+      card: "老城、图里亚花园、艺术与科学城，还有大海。",
+      title: "tinyvlc · 口袋里的瓦伦西亚",
+      description:
+        "用开放数据生成的等距像素风瓦伦西亚微缩模型：老城、建在旧河床上的图里亚花园、艺术与科学城、港口和海滩。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的瓦伦西亚艺术与科学城",
+      tagline: "口袋里的瓦伦西亚",
+      about: {
+        intro:
+          "等距像素风的瓦伦西亚微缩模型。没有人手绘它：每一个街区、每一栋建筑、每一座广场和每一棵树，都是用代码从开放数据生成的。这里有老城、建在旧河床上的图里亚花园、艺术与科学城、港口和海滩。",
+        notes: [
+          "提前说明：这里的大多数建筑高度是根据记录的楼层数推算的，其余是估算的。城市的形状是真实的；每栋建筑的确切高度则不一定。",
+          "地图经过旋转，让市中心的街道沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区",
+      mapLabel: "瓦伦西亚的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索瓦伦西亚",
+      splash: "正在种橙子树…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // a Valencia orange

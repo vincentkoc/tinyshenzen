@@ -75,6 +75,28 @@ export const tinydal: World = {
       searchPlaceholder: "Buscar en Dallas",
       splash: "Encendiendo la Reunion Tower…",
     },
+    "zh-CN": {
+      city: "达拉斯",
+      card: "市中心、重聚塔、公平公园和三一河。",
+      title: "tinydal · 口袋里的达拉斯",
+      description:
+        "用开放数据生成的等距像素风达拉斯微缩模型：市中心和上城的高楼、重聚塔、迪利广场、深埃勒姆和艺术区、公平公园、三一河及其桥梁、拉夫菲尔德机场和白石湖。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的达拉斯市中心和重聚塔",
+      tagline: "口袋里的达拉斯",
+      about: {
+        intro:
+          "等距像素风的达拉斯微缩模型：市中心和上城以及那里的高楼、重聚塔和迪利广场、深埃勒姆、艺术区和公平公园、三一河及其桥梁、高地公园、毕晓普艺术区和橡树崖、拉夫菲尔德机场和白石湖。没有人手绘它：每一个街区、每一栋高楼、每一个泳池和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据，城市里大多数建筑都有测量值。其中有一些明显有误，最离谱的几处已经手动修正。",
+          "地图经过旋转，让城市的路网沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "城市",
+      mapLabel: "达拉斯的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索达拉斯",
+      splash: "正在点亮重聚塔…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the green of the lights that outline Bank of America Plaza at night

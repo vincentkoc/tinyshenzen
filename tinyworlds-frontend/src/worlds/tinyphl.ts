@@ -76,6 +76,28 @@ export const tinyphl: World = {
       searchPlaceholder: "Buscar en Filadelfia",
       splash: "Subiendo la escalinata del museo…",
     },
+    "zh-CN": {
+      city: "费城",
+      card: "中心城区、独立厅和艺术博物馆。",
+      title: "tinyphl · 口袋里的费城",
+      description:
+        "用开放数据生成的等距像素风费城微缩模型：特拉华河与斯库基尔河之间的中心城区、顶着威廉·佩恩像的市政厅及周围的高楼、独立厅和自由钟、老城和社会山、富兰克林大道、艺术博物馆和它的台阶、船屋街、大学城、南费城一路排到体育场的联排房屋，以及特拉华河上的本杰明·富兰克林大桥。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的费城中心城区和市政厅",
+      tagline: "口袋里的费城",
+      about: {
+        intro:
+          "等距像素风的费城微缩模型：坐落在特拉华河与斯库基尔河之间的中心城区、顶着威廉·佩恩像的市政厅及周围的高楼、独立厅和自由钟、老城和社会山、通往艺术博物馆及其台阶的本杰明·富兰克林大道、船屋街、大学城、南费城一路排到体育场的联排房屋，以及特拉华河上的本杰明·富兰克林大桥。没有人手绘它：每一个街区、每一栋高楼、每一排联排房屋和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据，城市里几乎每栋建筑都有测量值。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让城市的路网沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区域",
+      mapLabel: "费城的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索费城",
+      splash: "正在跑上艺术博物馆的台阶…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the blue of the city's flag, lit up enough to read on the signs

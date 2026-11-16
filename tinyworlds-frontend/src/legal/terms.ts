@@ -1,7 +1,7 @@
 import type { LegalDocs } from "./types";
 
 /**
- * The terms of service, in the three languages. The English text is the one that counts (its
+ * The terms of service, in the four languages. The English text is the one that counts (its
  * last section says so); the others say the same, section by section and point by point, with
  * the same links (`legal.test.ts` checks).
  */
@@ -129,7 +129,7 @@ export const TERMS: LegalDocs = {
         id: "language",
         title: "Language",
         blocks: [
-          "These terms are written in English and translated into Portuguese and Spanish. If a translation ever differs from the English text, the English text prevails.",
+          "These terms are written in English and translated into Portuguese, Spanish and Simplified Chinese. If a translation ever differs from the English text, the English text prevails.",
         ],
       },
       {
@@ -263,7 +263,7 @@ export const TERMS: LegalDocs = {
         id: "language",
         title: "Idioma",
         blocks: [
-          "Estes termos foram escritos em inglês e traduzidos para o português e o espanhol. Se uma tradução divergir do texto em inglês, vale o texto em inglês.",
+          "Estes termos foram escritos em inglês e traduzidos para o português, o espanhol e o chinês simplificado. Se uma tradução divergir do texto em inglês, vale o texto em inglês.",
         ],
       },
       {
@@ -397,13 +397,146 @@ export const TERMS: LegalDocs = {
         id: "language",
         title: "Idioma",
         blocks: [
-          "Estas condiciones están escritas en inglés y traducidas al portugués y al español. Si una traducción difiere del texto en inglés, prevalece el texto en inglés.",
+          "Estas condiciones están escritas en inglés y traducidas al portugués, al español y al chino simplificado. Si una traducción difiere del texto en inglés, prevalece el texto en inglés.",
         ],
       },
       {
         id: "contact",
         title: "Contacto",
         blocks: ["¿Dudas sobre estas condiciones? Escribe a {email}."],
+      },
+    ],
+  },
+  "zh-CN": {
+    title: "服务条款",
+    description:
+      "使用 tinyworlds 的规则：地图、捐助、捐助者的名字和链接，以及我们能承诺和不能承诺的事。",
+    summary: [
+      "地图可以免费探索，不需要账号。",
+      "捐助是一份帮助建造城市、维持网站运行的赠与，而不是购买。",
+      "如果你把名字或链接放在一座城市上，请保持得体：不得体的内容我们可能会隐藏。",
+      "这些地图是用开放数据创作的艺术作品：不能用来认路。",
+    ],
+    sections: [
+      {
+        id: "these-terms",
+        title: "关于本条款",
+        blocks: [
+          "tinyworlds（“tinyworlds”、“我们”）是一个由一个人制作和运营的小型独立项目，把真实的城市和几个虚构的地方重新绘制成像素画地图。本条款适用于整个网站：首页、每张地图、“你的城市”和名人堂。",
+          "使用本网站即表示你同意本条款；如果你不同意，请不要使用。我们如何处理个人信息，请见我们的[隐私政策](privacy)。",
+        ],
+      },
+      {
+        id: "using",
+        title: "使用本网站",
+        blocks: [
+          "探索地图是免费的，不需要账号。尽情四处看看、搜索、分享任何视图的链接，玩“猜建筑”。但请不要：",
+          {
+            items: [
+              "攻击网站、其 API 或服务器，或使其过载，或试图入侵它们；",
+              "向网站发送虚构的访问、答题答案或其他数据，或使用程序刷高各项计数；",
+              "以加重我们服务器负担的方式，用自动化工具批量复制地图（代码和数据都是开放的：你可以自己绘制这些地图）；",
+              "利用本网站违反法律或侵犯任何人的权利。",
+            ],
+          },
+        ],
+      },
+      {
+        id: "maps",
+        title: "这些地图是艺术作品",
+        blocks: [
+          "每张地图都是由程序根据开放数据绘制的，数据没有说明的地方，高度、颜色和细节都是推测的。街道、建筑和地点可能缺失、位置不对、过时或有误，来自维基百科的建筑介绍也一样。请不要依靠这些地图认路、做出有关房产或安全的决定，或用于任何其他需要准确性的事情。",
+          "临冬城、君临城和维斯特洛是粉丝自制的：它们是故事中地方的非官方地图，由我们设计布局，与原作者或该剧集没有关联，也未获得其认可。",
+        ],
+      },
+      {
+        id: "donations",
+        title: "捐助",
+        blocks: [
+          "捐助是自愿的。捐助以美元进行，最低 1 美元，通过 Stripe 支付，Stripe 按其自身条款处理付款；我们永远看不到你的银行卡信息。",
+          {
+            items: [
+              {
+                term: "是赠与，不是购买。",
+                text: "捐助是对项目的支持。它不购买任何产品或服务、项目的任何份额，也不赋予对地图的任何权利。tinyworlds 不是注册慈善机构，因此捐助不能抵税。",
+              },
+              {
+                term: "城市如何建造。",
+                text: "你可以在捐助时提名一座城市。当提名一座城市的捐助达到它的目标（显示在网站上：目前为 30 美元）时，这座城市就会被建造，筹款最多的城市最先建造。我们会尽快建造已筹满的城市，但无法承诺具体日期。尚未筹满的城市的目标可能会变化。",
+              },
+              {
+                term: "超出目标的部分。",
+                text: "超出城市目标的捐助，以及没有提名城市的捐助，将用于支付服务器费用，让项目持续改进。",
+              },
+              {
+                term: "如果城市无法建造。",
+                text: "有时某个地方没有足够的开放数据来画好它。如果已筹满的城市发生这种情况，我们会写信给它的捐助者，提出把他们的捐助转给另一座城市，或者退款。",
+              },
+              {
+                term: "退款。",
+                text: "除此之外，捐助不予退还。如果你误捐了（金额错误或重复捐助），请在 30 天内写信到 {email}，我们会退款。",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: "names-and-links",
+        title: "你的名字和链接",
+        blocks: [
+          "当你为一座城市捐助时，你可以要求被列入它的捐助者名单；捐助之后，你还可以在名字旁边显示最多三个链接。名字和链接是公开的：它们会出现在城市的名单上、首页和名人堂中，这些链接是搜索引擎会跟踪的普通链接。你的名字和链接不得：",
+          {
+            items: [
+              "具有冒犯性、仇恨性、色情或暴力内容；",
+              "冒充他人，或使用你无权使用的名字或品牌；",
+              "指向任何违法、有害、欺骗性或恶意的内容（恶意软件、网络钓鱼、诈骗）；",
+              "侵犯任何人的权利。",
+            ],
+          },
+          "为了显示链接，网站会读取一次所链接的页面，并保存它的标题、描述，以及图标和配图的小尺寸副本。你要对你链接的内容负责。如果我们认为某个名字或链接违反了这些规则，我们可以随时隐藏或移除它，无需事先通知；你的捐助和你的砖仍然计入。你可以随时在[你的城市](me)页面修改你的名字、署名和链接。",
+        ],
+      },
+      {
+        id: "signing-in",
+        title: "登录",
+        blocks: [
+          "捐助者用邮箱地址登录：我们会发送一个链接和一个 6 位验证码，无需密码。任何能读取你收件箱的人都能以你的身份登录，所以请妥善保管。会话在你登录的设备上持续 7 天；退出登录即在该设备上结束会话。",
+        ],
+      },
+      {
+        id: "code-and-data",
+        title: "代码、数据和名称",
+        blocks: [
+          "tinyworlds 背后的代码是开源的，采用 [MIT 许可证](license)。地图数据属于其贡献者，适用他们各自的许可（例如 OpenStreetMap 的数据采用[开放数据库许可](odbl)）；每张地图的“关于”中列出了它的数据来源。建筑介绍来自维基百科，采用 [CC BY-SA 4.0](ccbysa) 许可。",
+          "tinyworlds 这个名称和字标归我们所有：请不要以暗示你的作品属于我们或得到我们认可的方式使用它们。",
+        ],
+      },
+      {
+        id: "changes",
+        title: "变更与可用性",
+        blocks: [
+          "本网站按现状提供。我们可以随时更改、暂停或停止其中任何部分，包括某张地图。我们会努力维持网站运行，但无法承诺它始终可用或没有错误。",
+          "我们可能会更新本条款。更新时，我们会修改顶部的日期；如果变更对捐助者有影响，我们还会通过邮件告知他们。变更后继续使用本网站，即表示你接受新的条款。",
+        ],
+      },
+      {
+        id: "liability",
+        title: "责任",
+        blocks: [
+          "在法律允许的范围内，tinyworlds 不提供任何形式的保证，对于你使用本网站所产生的任何间接、附带或后果性损失，我们不承担责任。在我们需要承担责任的情况下，我们的全部责任以你在索赔前 12 个月内的捐助金额为限。本条款中的任何内容都不限制你所在国家法律赋予你且不允许限制的权利。",
+        ],
+      },
+      {
+        id: "language",
+        title: "语言",
+        blocks: [
+          "本条款以英文撰写，并翻译成葡萄牙语、西班牙语和简体中文。如果译文与英文文本有任何不一致，以英文文本为准。",
+        ],
+      },
+      {
+        id: "contact",
+        title: "联系",
+        blocks: ["对本条款有疑问？请写信到 {email}。"],
       },
     ],
   },

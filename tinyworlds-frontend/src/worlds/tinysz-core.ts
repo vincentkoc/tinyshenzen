@@ -74,6 +74,28 @@ export const tinyszCore: World = {
       searchPlaceholder: "Buscar en Shenzhen",
       splash: "Encendiendo las torres…",
     },
+    "zh-CN": {
+      city: "深圳（南山—罗湖）",
+      card: "南山、福田和罗湖：装进口袋的深圳核心区。",
+      title: "tinysz · 深圳，从南山到罗湖",
+      description:
+        "用开放数据生成的等距像素风深圳微缩模型：南山的蛇口和后海、福田市民中心周围的玻璃高楼、罗湖的东门，还有棕榈树、公园和深圳湾。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的南山、福田和罗湖",
+      tagline: "口袋里的深圳",
+      about: {
+        intro:
+          "等距像素风的深圳微缩模型：南山的蛇口和后海，福田的市民中心和平安金融中心，以及东边的东门和罗湖口岸。没有人手绘它：每一个街区、每一栋高楼、每一棵棕榈树和每一条小路，都是用代码从开放数据生成的，建筑轮廓、街道、公园和水系取自 OpenStreetMap 和 Overture Maps 基金会。",
+        notes: [
+          "建筑高度来自地图数据；缺少高度时，按楼层数推算。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让福田的路网沿着像素排列。指南针上的北方指向右上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区",
+      mapLabel: "深圳的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索深圳",
+      splash: "正在点亮高楼…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // Shenzhen Bay teal

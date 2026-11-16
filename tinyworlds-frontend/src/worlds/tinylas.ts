@@ -75,6 +75,28 @@ export const tinylas: World = {
       searchPlaceholder: "Buscar en Las Vegas",
       splash: "Encendiendo el neón…",
     },
+    "zh-CN": {
+      city: "拉斯维加斯",
+      card: "大道、市中心和沙漠谷地。",
+      title: "tinylas · 口袋里的拉斯维加斯",
+      description:
+        "用开放数据生成的等距像素风拉斯维加斯微缩模型：拉斯维加斯大道和它的度假酒店、市中心和弗里蒙特街、机场、体育场，以及周围的沙漠谷地。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的拉斯维加斯大道",
+      tagline: "口袋里的拉斯维加斯",
+      about: {
+        intro:
+          "等距像素风的拉斯维加斯微缩模型：拉斯维加斯大道和它的度假酒店、市中心和弗里蒙特街、机场、体育场，以及周围的沙漠谷地。没有人手绘它：每一个街区、每一栋高楼、每一个泳池和每一棵棕榈树，都是用代码从开放数据生成的，建筑轮廓、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让谷地的路网沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "城市",
+      mapLabel: "拉斯维加斯的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索拉斯维加斯",
+      splash: "正在点亮霓虹灯…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // neon pink

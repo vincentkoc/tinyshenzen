@@ -9,7 +9,7 @@ One build is one **target**: a **world** — the cities `tinynyc`, `tinyrao`, `t
 places that do not exist, `tinywinterfell`,
 `tinykingslanding` and `tinywesteros` (the whole known world) — or `home`, the front page that
 lists the worlds. The interface speaks the visitor's language (English, Brazilian
-Portuguese, Spanish), decided in the browser. Donations are optional: payment links, and, when
+Portuguese, Spanish, Simplified Chinese), decided in the browser. Donations are optional: payment links, and, when
 `tinyworlds-api` is deployed, a list of cities being funded (GraphQL through Apollo Client).
 With the API, every page also reports the steps of the donation funnel, and the front page's
 build carries the admin pages (`/admin/`) where signed-in admins read it.
@@ -41,7 +41,7 @@ npm run email-images # public/email/: the API's mails' pictures (the wordmark, t
 | `NEXT_PUBLIC_ANALYTICS_SRC` / `NEXT_PUBLIC_ANALYTICS_SITE_ID` | unset                      | tracker script URL and site id; unset = no analytics                                                                      |
 | `NEXT_PUBLIC_GTM_ID`                                          | unset                      | Google Tag Manager container id (`GTM-XXXXXXX`); unset = nothing from Google is loaded                                    |
 | `NEXT_PUBLIC_DONATE_URL`                                      | unset                      | payment link (hosted checkout) in English, and the fallback for the other languages                                       |
-| `NEXT_PUBLIC_DONATE_URL_PT` / `NEXT_PUBLIC_DONATE_URL_ES`     | unset                      | the same checkout in Portuguese / Spanish                                                                                 |
+| `NEXT_PUBLIC_DONATE_URL_PT` / `_ES` / `_ZH`                   | unset                      | the same checkout in Portuguese / Spanish / Chinese                                                                       |
 | `NEXT_PUBLIC_API_URL`                                         | unset                      | GraphQL endpoint of `tinyworlds-api`: a URL or a same-origin path (`/api/graphql`)                                        |
 | `NEXT_PUBLIC_HOME_URL`                                        | `/`                        | where the front page is, for the "All cities" link inside a map                                                           |
 | `NEXT_PUBLIC_WORLDS_BASE`                                     | empty                      | what the worlds' folders hang from on the front page (`""` → `/tinynyc/`)                                                 |

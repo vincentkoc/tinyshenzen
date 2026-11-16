@@ -73,6 +73,26 @@ export const tinynyc: World = {
       searchPlaceholder: "Buscar en Nueva York",
       splash: "Levantando los edificios…",
     },
+    "zh-CN": {
+      city: "纽约",
+      card: "全部五个行政区，每栋建筑都是真实高度。",
+      title: "tinynyc · 口袋里的纽约",
+      description: "用开放数据逐个街区生成的等距像素风纽约市微缩模型。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的中央公园及其周围的曼哈顿街区",
+      tagline: "口袋里的纽约",
+      about: {
+        intro:
+          "等距像素风的纽约市微缩模型。没有人手绘它：每一个街区、每一栋高楼、每一座码头和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和海岸线全部取自公开来源。",
+        notes: [
+          "视角朝向北偏西北，经过旋转，让曼哈顿的大道沿着像素向右上方延伸。所以指南针上的北方偏向右侧。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "行政区",
+      mapLabel: "纽约市的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索纽约",
+      splash: "正在竖起天际线…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps · NYC Open Data",
   // taxi yellow

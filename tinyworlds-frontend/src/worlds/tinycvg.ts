@@ -75,6 +75,28 @@ export const tinycvg: World = {
       searchPlaceholder: "Buscar en Cincinnati",
       splash: "Cociendo el chili…",
     },
+    "zh-CN": {
+      city: "辛辛那提",
+      card: "市中心、莱茵河畔区和俄亥俄河上的桥。",
+      title: "tinycvg · 口袋里的辛辛那提",
+      description:
+        "用开放数据生成的等距像素风辛辛那提微缩模型：市中心和喷泉广场、莱茵河畔区、有棒球场和体育场的河滨、罗布林吊桥和紫色人行桥、联合车站、亚当斯山和伊甸公园，以及俄亥俄河对岸的科文顿和纽波特。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的辛辛那提市中心和俄亥俄河上的桥",
+      tagline: "口袋里的辛辛那提",
+      about: {
+        intro:
+          "等距像素风的辛辛那提微缩模型：市中心和喷泉广场、莱茵河畔区成排的砖房、有棒球场和体育场的河滨、俄亥俄河上的桥、联合车站、亚当斯山和伊甸公园、山上的动物园和大学，以及河对岸肯塔基州的科文顿和纽波特。没有人手绘它：每一个街区、每一栋高楼、每一座桥和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据，城市里大多数建筑都有测量值；只知道楼层数的，按楼层数推算高度。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让城市的路网沿着像素排列。因此指南针上的北方并不朝向正上方。山丘体现在街道上，而不在地面上：地图是平的。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "城市",
+      mapLabel: "辛辛那提的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索辛辛那提",
+      splash: "正在炖辣肉酱…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the purple of the Purple People Bridge, lit up enough to read on the signs

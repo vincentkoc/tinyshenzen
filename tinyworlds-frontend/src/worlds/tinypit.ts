@@ -76,6 +76,28 @@ export const tinypit: World = {
       searchPlaceholder: "Buscar en Pittsburgh",
       splash: "Subiendo en funicular…",
     },
+    "zh-CN": {
+      city: "匹兹堡",
+      card: "尖角、三条河和河上的桥。",
+      title: "tinypit · 口袋里的匹兹堡",
+      description:
+        "用开放数据生成的等距像素风匹兹堡微缩模型：金三角，阿勒格尼河与莫农加希拉河在这里汇成俄亥俄河；尖角州立公园和它的喷泉、三条河上的桥、有棒球场和体育场的北岸、斯特里普区、登上华盛顿山的缆索铁路，以及有学习大教堂的奥克兰区。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的匹兹堡金三角和河上的桥",
+      tagline: "口袋里的匹兹堡",
+      about: {
+        intro:
+          "等距像素风的匹兹堡微缩模型：金三角和尖角州立公园，阿勒格尼河与莫农加希拉河在这里汇成俄亥俄河；三条河上的桥、有棒球场和体育场的北岸、斯特里普区和劳伦斯维尔、华盛顿山下的南区和山上的两条缆索铁路，以及有大学和学习大教堂的奥克兰区。没有人手绘它：每一个街区、每一栋高楼、每一座桥和每一棵树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据，城市里大约一半的建筑有测量值，市中心的每栋高楼都在其中；其余的大多是住宅，按同类建筑的常见高度设定。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让城市的路网沿着像素排列。因此指南针上的北方并不朝向正上方。山丘体现在街道上，而不在地面上：地图是平的。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区域",
+      mapLabel: "匹兹堡的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索匹兹堡",
+      splash: "正在乘坐缆索铁路…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the gold of the city's black and gold, lit up enough to read on the signs

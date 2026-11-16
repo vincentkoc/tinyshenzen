@@ -1,7 +1,7 @@
 import type { LegalDocs } from "./types";
 
 /**
- * The privacy policy, in the three languages, section by section and point by point with the
+ * The privacy policy, in the four languages, section by section and point by point with the
  * same links (`legal.test.ts` checks). It says what the code does: the funnel and the visits
  * (`lib/funnel.ts`, the API's `funnel/` and `visits/`), the quiz's answers, the two kinds of
  * analytics (`components/analytics.tsx`, `lib/consent.ts`), what the browser keeps, the
@@ -214,7 +214,7 @@ export const PRIVACY: LegalDocs = {
         id: "changes",
         title: "Changes",
         blocks: [
-          "When this policy changes, we update the date at the top, and if a change matters to donors we tell them by email. It is written in English and translated into Portuguese and Spanish; if a translation ever differs from the English text, the English text prevails.",
+          "When this policy changes, we update the date at the top, and if a change matters to donors we tell them by email. It is written in English and translated into Portuguese, Spanish and Simplified Chinese; if a translation ever differs from the English text, the English text prevails.",
         ],
       },
     ],
@@ -424,7 +424,7 @@ export const PRIVACY: LegalDocs = {
         id: "changes",
         title: "Mudanças",
         blocks: [
-          "Quando esta política mudar, atualizaremos a data no topo e, se a mudança importar para os doadores, os avisaremos por e-mail. Ela foi escrita em inglês e traduzida para o português e o espanhol; se uma tradução divergir do texto em inglês, vale o texto em inglês.",
+          "Quando esta política mudar, atualizaremos a data no topo e, se a mudança importar para os doadores, os avisaremos por e-mail. Ela foi escrita em inglês e traduzida para o português, o espanhol e o chinês simplificado; se uma tradução divergir do texto em inglês, vale o texto em inglês.",
         ],
       },
     ],
@@ -634,7 +634,216 @@ export const PRIVACY: LegalDocs = {
         id: "changes",
         title: "Cambios",
         blocks: [
-          "Cuando esta política cambie, actualizaremos la fecha de arriba y, si el cambio importa a los donantes, se lo diremos por correo. Está escrita en inglés y traducida al portugués y al español; si una traducción difiere del texto en inglés, prevalece el texto en inglés.",
+          "Cuando esta política cambie, actualizaremos la fecha de arriba y, si el cambio importa a los donantes, se lo diremos por correo. Está escrita en inglés y traducida al portugués, al español y al chino simplificado; si una traducción difiere del texto en inglés, prevalece el texto en inglés.",
+        ],
+      },
+    ],
+  },
+  "zh-CN": {
+    title: "隐私政策",
+    description:
+      "当你探索、捐助或登录时，tinyworlds 收集什么、为什么收集、还有谁能看到，以及如何更正或删除这些信息。",
+    summary: [
+      "你可以探索每一张地图，而不必告诉我们你是谁。我们不出售数据，也不展示广告。",
+      "访问量用一个只存在于单个浏览器标签页中的随机 ID 来统计，而不是用 Cookie。",
+      "Google Analytics 的 Cookie 只在获得允许的地方使用：在欧洲我们会先征求同意，任何人都可以拒绝。",
+      "如果你捐助，付款由 Stripe 处理；我们保存你的邮箱、你捐了多少，以及（如果你选择的话）你在城市上的名字。",
+      "如果你要求在某座城市建成时收到通知，我们会把你的邮箱保存在那份名单上，只发送与之相关的邮件；每封邮件都有退出的链接。",
+      "写信到 {email}，即可查看、更正或删除我们保存的关于你的信息。",
+    ],
+    sections: [
+      {
+        id: "who",
+        title: "我们是谁",
+        blocks: [
+          "tinyworlds 是一个由一个人制作和运营的小型独立项目。我们决定本网站收集什么以及为什么收集，你可以通过 {email} 联系我们。本政策适用于整个网站：首页、每张地图、“你的城市”和名人堂。",
+        ],
+      },
+      {
+        id: "exploring",
+        title: "当你探索时",
+        blocks: [
+          "探索不需要账号，地图也从不询问你是谁。为了让我们知道哪些地图被访问过，以及一笔捐助是怎么来的，每个页面会告诉我们的服务器：",
+          {
+            items: [
+              {
+                term: "页面被打开了：",
+                text: "哪张地图，以及界面语言，附带一个由页面随机生成并保存在该标签页会话存储中的 ID。标签页关闭后这个 ID 就消失了；它不是 Cookie，也不透露你是谁。",
+              },
+              {
+                term: "地图仍然开着：",
+                text: "地图在视野中时每 30 秒一次，这样网站就能显示现在有多少人在探索，我们也能看到访问持续多久。",
+              },
+              {
+                term: "走向捐助的各个步骤：",
+                text: "打开捐助面板、开始结账，或未付款就从结账页面返回，附带所选的城市和金额。",
+              },
+              {
+                term: "你在“猜建筑”中的答案：",
+                text: "被问到的建筑、你选的名字、难度和语言，这样每个人都能看到其他人是怎么回答的。",
+              },
+            ],
+          },
+          "这些信息都不包含你的名字、邮箱或 IP 地址。如果你之后捐助，捐助会保留这次访问的 ID，从而把这次访问的各个步骤与你的捐助联系起来。来自已登录我们管理员账号的浏览器的访问，或来自由程序驱动的浏览器的访问，不会被计入。",
+        ],
+      },
+      {
+        id: "analytics",
+        title: "分析工具与 Cookie",
+        blocks: [
+          "我们使用两种分析工具来了解人们如何找到和使用这些地图：",
+          {
+            items: [
+              {
+                term: "Rybbit，",
+                text: "由我们自己运行。它统计页面浏览量和少数几种点击（打开捐助面板、开始游戏），附带页面、你来自的网站、你的浏览器、设备和语言，以及根据你的 IP 地址推算的国家和地区。它不设置任何 Cookie。",
+              },
+              {
+                term: "Google Analytics，",
+                text: "通过 Google Tag Manager 加载。它会设置 Cookie（_ga），Google 按其自身的[隐私政策](google)处理它收集的信息。如果你的浏览器设置为欧洲时区（或隐藏了时区），我们会先征求你的同意，在你同意之前不会加载任何来自 Google 的内容；在其他地区，它会随页面加载，所有与广告有关的功能都已关闭。无论你在哪里，都可以随时在首页或地图的“关于”中的[Cookie 设置](cookies)里拒绝：拒绝会被记住，Google 的 Cookie 也会被删除。",
+              },
+            ],
+          },
+          "本网站没有任何页面将 Cookie 用于广告。",
+        ],
+      },
+      {
+        id: "your-browser",
+        title: "保存在你浏览器中的内容",
+        blocks: [
+          "本网站会在你浏览器的存储中保存几样东西，除上文所述外，它们永远不会离开你的浏览器：",
+          {
+            items: [
+              "你的设置（语言、主题、地图的各个开关）以及你对 Cookie 问题的回答；",
+              "你在“猜建筑”中已经玩过的建筑，以及你选择的游戏；",
+              "访问的 ID，以及你在结账期间于捐助面板中的选择（保存在会话存储中，标签页关闭后即消失）；",
+              "如果你登录，你的会话，保存 7 天；",
+              "如果你在登录前点击了“通知我”，你要求加入哪份名单以及何时（保存在 tinyworlds.join 下）：登录完成后它会被读取并删除，超过一小时则被忽略。",
+            ],
+          },
+          "你可以随时在浏览器设置中清除它们。",
+        ],
+      },
+      {
+        id: "donating",
+        title: "当你捐助时",
+        blocks: [
+          "付款由 Stripe 处理，适用其[隐私政策](stripe)。Stripe 收集你的银行卡或其他付款信息以及你的邮箱地址；我们永远看不到你的银行卡信息。我们从 Stripe 接收并保存：",
+          {
+            items: [
+              "你的邮箱地址；",
+              "金额、币种、日期以及 Stripe 对这笔付款的参考编号；",
+              "你提名的城市、你来自的地图、语言和访问的 ID；",
+              "你要求署名的名字（如果有的话）。",
+            ],
+          },
+          "我们用你的邮箱地址感谢你的捐助，在你捐助的城市建成时通知你，并告诉你一次你已进入名人堂；tinyworlds 的制作者也可能用他自己的邮箱给你写一封信，亲自向你道谢。除了你主动要求加入的名单（见下文），我们不发送任何简报或营销邮件，你的邮箱地址也永远不会在网站上向任何人显示。",
+        ],
+      },
+      {
+        id: "public",
+        title: "哪些内容是公开的",
+        blocks: [
+          "一笔捐助的金额和砖会显示在其城市的名单上，但不会说明是谁捐的，除非你要求署名：那样你的名字会和你添加的链接一起显示在那里、首页和名人堂中。你可以随时在[你的城市](me)页面取消署名、修改名字或移除链接。违反我们[服务条款](terms)的名字或链接，我们可能会隐藏。",
+          "为了显示链接，我们的服务器会读取一次所链接的页面（之后每当你要求时再读取），并保存它的标题、描述，以及图标和配图的小尺寸副本，这样访客的浏览器就永远不会联系被链接的网站。",
+        ],
+      },
+      {
+        id: "signing-in",
+        title: "当你登录时",
+        blocks: [
+          "任何人都可以用邮箱地址登录，查看自己捐了什么，或加入一份名单（见下文）。无论是否捐助过，我们都会保存该地址及其最后一次登录的时间，直到你要求我们删除。每个登录链接和验证码只能使用一次，有效期 15 分钟；我们只保存它们的单向哈希值，从不保存链接或验证码本身；如果链接是通过“通知我”申请的，还会保存它对应的名单。",
+        ],
+      },
+      {
+        id: "lists",
+        title: "当你要求接收通知时",
+        blocks: [
+          "任何人都可以点击“通知我”，并通过登录链接或验证码确认自己的邮箱地址，要求在某座城市建成时、或有新城市建成时收到通知。对于你加入的每份名单，除了你的地址，我们还会保存是哪份名单、你何时加入，以及你加入时所在页面的语言。我们会发送：",
+          {
+            items: [
+              "一封欢迎邮件，附上已在地图上的城市中的三座建筑；",
+              "你等待的城市建成时的一封邮件；对于“新城市”名单，每当有新世界加入地图时发送一封。",
+            ],
+          },
+          "名单不会发送任何其他内容。一座城市的名单在其通知邮件发出后即结束；“新城市”名单则持续到你退出为止。",
+          "你可以随时退出：每封名单邮件都有一个无需登录的“退出此名单”链接，你邮件程序自带的退订按钮也同样有效。你也可以在[你的城市](me)页面退出任何名单。",
+          "退出只会把你从名单中移除，仅此而已：你的地址会像任何登录一样保留（见上文），并附有发给它的名单邮件记录（欢迎邮件何时发出，其他每封邮件是关于哪座城市以及何时发出），以免有人收到两次通知。两者都会保留到你要求我们删除为止。",
+        ],
+      },
+      {
+        id: "sharing",
+        title: "还有谁能看到",
+        blocks: [
+          "我们不出售或出租个人数据，也不为广告目的分享个人数据。除了我们，只有以下各方会接触到这些数据：",
+          {
+            items: [
+              { term: "Stripe，", text: "用于付款。" },
+              { term: "Google，", text: "用于 Google Analytics，仅在获得允许的地方（见上文）。" },
+              {
+                term: "运行本网站的服务器，",
+                text: "用于网站、数据库、邮件和 Rybbit。和任何 Web 服务器一样，它们能看到你的 IP 地址和浏览器，并将其写入技术日志，仅用于运行和保护网站；API 也会短暂使用这些地址，以限制向它发出请求的频率。",
+              },
+              { term: "有关当局，", text: "如果法律要求。" },
+            ],
+          },
+          "Stripe 和 Google 可能会在你所在国家以外（包括美国）处理数据。",
+        ],
+      },
+      {
+        id: "keeping",
+        title: "我们保存多久",
+        blocks: [
+          {
+            items: [
+              {
+                term: "捐助：",
+                text: "在网站运行期间一直保存：它们构成了每座城市的筹款和捐助者名单，也是付款的记录。",
+              },
+              {
+                term: "你的地址和捐助者信息",
+                text: "（邮箱地址、名字、链接），无论你是捐助过还是只登录过：保存到你要求我们删除为止。",
+              },
+              {
+                term: "访问记录和答题答案：",
+                text: "会被保存，但其中没有任何指向你的信息，用于长期统计访问量和答案。",
+              },
+              {
+                term: "名单成员资格：",
+                text: "保存到你退出名单为止；对于某座城市的名单，保存到其通知邮件发出为止。",
+              },
+              {
+                term: "名单邮件记录",
+                text: "（每封邮件是关于哪座城市以及何时发出，欢迎邮件何时发出）：保存到你要求我们删除你的地址为止，以免有人收到两次通知。",
+              },
+              {
+                term: "登录链接和验证码：",
+                text: "只以单向哈希值的形式保存，如有申请链接时对应的名单也一并保存：保存一天，或保存到该地址下次申请为止，以较晚者为准。",
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: "rights",
+        title: "你的权利",
+        blocks: [
+          "根据你所在的地区（例如欧洲和英国的 GDPR、巴西的 LGPD、加州的 CCPA 等），你可能有权了解我们保存了你的哪些信息、获取一份副本、要求更正或删除，以及反对其使用。无论你住在哪里，只要用相关的邮箱地址写信到 {email}，我们都会在 30 天内处理。如果我们删除了你的捐助者信息，你的捐助仍会计入相应的城市，但不会再留下任何与你相关的信息。你也可以向你所在地的数据保护机构投诉。",
+          "在法律要求提供法律依据的情况下：运行网站和统计访问量属于我们的正当利益；记录捐助并就此与你联系，是履行你所做捐助的需要；Google Analytics 的 Cookie，以及显示你的名字和链接，基于你的同意，你可以随时撤回。",
+        ],
+      },
+      {
+        id: "children",
+        title: "儿童",
+        blocks: [
+          "地图适合所有人。捐助和登录仅限成年人：如果你未满 18 岁，请先征得父母或监护人的同意。我们不会故意收集 13 岁以下儿童的个人信息；如果你认为我们收集了，请写信给我们，我们会将其删除。",
+        ],
+      },
+      {
+        id: "changes",
+        title: "变更",
+        blocks: [
+          "本政策变更时，我们会更新顶部的日期；如果变更对捐助者有影响，我们会通过邮件告知他们。本政策以英文撰写，并翻译成葡萄牙语、西班牙语和简体中文；如果译文与英文文本有任何不一致，以英文文本为准。",
         ],
       },
     ],

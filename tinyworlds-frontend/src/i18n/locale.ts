@@ -3,7 +3,7 @@
  * run time: their own choice in the settings if they made one, otherwise the first language
  * their browser asks for that we have.
  */
-export const LOCALES = ["en-US", "pt-BR", "es-ES"] as const;
+export const LOCALES = ["en-US", "pt-BR", "es-ES", "zh-CN"] as const;
 export type Locale = (typeof LOCALES)[number];
 
 /** The setting: a language, or "follow the browser". */
@@ -16,10 +16,20 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   "en-US": "English",
   "pt-BR": "Português",
   "es-ES": "Español",
+  "zh-CN": "简体中文",
 };
 
-/** Any variety of a language gets the one variety we have: pt-PT reads pt-BR, es-MX reads es-ES. */
-const BY_LANGUAGE: Record<string, Locale> = { en: "en-US", pt: "pt-BR", es: "es-ES" };
+/**
+ * Any variety of a language gets the one variety we have: pt-PT reads pt-BR, es-MX reads es-ES,
+ * and Chinese in any script or region (zh-TW, zh-HK, zh-Hant) reads Simplified Chinese, the only
+ * Chinese there is.
+ */
+const BY_LANGUAGE: Record<string, Locale> = {
+  en: "en-US",
+  pt: "pt-BR",
+  es: "es-ES",
+  zh: "zh-CN",
+};
 
 export const isLocale = (value: unknown): value is Locale =>
   typeof value === "string" && (LOCALES as readonly string[]).includes(value);

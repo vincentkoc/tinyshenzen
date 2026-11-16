@@ -21,6 +21,7 @@ export const DONATE_LINKS: Links = {
   "en-US": (process.env.NEXT_PUBLIC_DONATE_URL ?? "").trim(),
   "pt-BR": (process.env.NEXT_PUBLIC_DONATE_URL_PT ?? "").trim(),
   "es-ES": (process.env.NEXT_PUBLIC_DONATE_URL_ES ?? "").trim(),
+  "zh-CN": (process.env.NEXT_PUBLIC_DONATE_URL_ZH ?? "").trim(),
 };
 
 /** The GraphQL endpoint: a full URL or a same-origin path. Empty when the build has no API. */
@@ -33,6 +34,7 @@ export const CHECKOUT_LOCALE: Record<Locale, string> = {
   "en-US": "en",
   "pt-BR": "pt-BR",
   "es-ES": "es",
+  "zh-CN": "zh",
 };
 
 /**

@@ -5,6 +5,7 @@ import { esES } from "./es-ES";
 import { resolveLocale, type Locale } from "./locale";
 import { ptBR } from "./pt-BR";
 import type { Strings } from "./types";
+import { zhCN } from "./zh-CN";
 
 export {
   DEFAULT_LOCALE,
@@ -18,7 +19,12 @@ export {
 } from "./locale";
 export type { Strings } from "./types";
 
-export const DICTIONARIES: Record<Locale, Strings> = { "en-US": en, "pt-BR": ptBR, "es-ES": esES };
+export const DICTIONARIES: Record<Locale, Strings> = {
+  "en-US": en,
+  "pt-BR": ptBR,
+  "es-ES": esES,
+  "zh-CN": zhCN,
+};
 
 /**
  * The visitor's language, as an external store for React. The page is prerendered in the site's

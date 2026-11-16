@@ -75,6 +75,28 @@ export const tinyfte: World = {
       searchPlaceholder: "Buscar em El Calafate",
       splash: "Descongelando o lago…",
     },
+    "zh-CN": {
+      city: "埃尔卡拉法特",
+      card: "阿根廷湖畔的巴塔哥尼亚小镇。",
+      title: "tinyfte · 口袋里的埃尔卡拉法特",
+      description:
+        "用开放数据生成的等距像素风埃尔卡拉法特微缩模型：这座巴塔哥尼亚小镇位于阿根廷湖南岸，是前往莫雷诺冰川的门户。低矮的房屋、湖滨、尼梅斯潟湖和周围的草原。拖动、缩放，搜索整个小镇。",
+      cardAlt: "以等距像素画绘制的阿根廷湖畔的埃尔卡拉法特",
+      tagline: "口袋里的埃尔卡拉法特",
+      about: {
+        intro:
+          "等距像素风的埃尔卡拉法特微缩模型，这座巴塔哥尼亚小镇位于阿根廷湖南岸。没有人手绘它：每一个街区、每一栋房屋、每一条街道和每一棵树，都是用代码从开放数据生成的。这里有低矮的房屋、湖滨、尼梅斯潟湖和四周的草原。小镇是前往莫雷诺冰川的门户，但冰川在约 80 公里外，不在地图上。",
+        notes: [
+          "提前说明：这里几乎没有建筑记录了高度，所以高度是根据卫星图像估算的。小镇的形状是真实的；每栋房屋的确切高度则不一定。",
+          "地图经过旋转，让市中心的街道沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区域",
+      mapLabel: "埃尔卡拉法特的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索埃尔卡拉法特",
+      splash: "正在解冻湖面…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the violet of the calafate berry the town is named after

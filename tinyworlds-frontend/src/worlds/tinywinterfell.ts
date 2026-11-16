@@ -76,6 +76,28 @@ export const tinywinterfell: World = {
       searchPlaceholder: "Buscar en Invernalia",
       splash: "Se acerca el invierno…",
     },
+    "zh-CN": {
+      city: "临冬城",
+      card: "北境的城堡和它的冬镇。",
+      title: "tinywinterfell · 口袋里的临冬城",
+      description:
+        "等距像素风的临冬城微缩模型：北境的巨大城堡，有城墙、塔楼和神木林，城门外是冬镇。一张由代码生成的粉丝自制地图。拖动、缩放，四处看看。",
+      cardAlt: "以等距像素画绘制的临冬城城堡",
+      tagline: "口袋里的临冬城",
+      about: {
+        intro:
+          "等距像素风的临冬城微缩模型：北境的巨大城堡，有城墙、塔楼和神木林，城门外是冬镇。没有人手绘它：每一段城墙、每一座塔楼、每一片屋顶和每一棵树，都是用代码生成的。",
+        notes: [
+          "这是一个非官方的粉丝自制微缩模型，与乔治·R·R·马丁（George R. R. Martin）及 HBO 没有任何关联，也未获得其认可。",
+          "布局是为这张地图虚构的，由代码生成，并非取自任何官方地图。地名来自原著，但每个地方在这里的位置只是猜测。",
+        ],
+      },
+      hoodLines: { label: "城区", inSentence: "城区" },
+      borough: "区域",
+      mapLabel: "临冬城的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索临冬城",
+      splash: "凛冬将至…",
+    },
   },
   // never shown: a made-up place has no data to credit (the corner says "fan-made" in the visitor's language)
   credit: "Fan-made · invented map",

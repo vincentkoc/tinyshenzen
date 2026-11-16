@@ -74,6 +74,28 @@ export const tinysz: World = {
       searchPlaceholder: "Buscar en Shenzhen",
       splash: "Encendiendo las torres…",
     },
+    "zh-CN": {
+      city: "深圳",
+      card: "福田、市民中心，一座玻璃高楼林立的城市。",
+      title: "tinysz · 口袋里的深圳",
+      description:
+        "用开放数据生成的等距像素风深圳微缩模型：市民中心周围的玻璃幕墙高楼、白色和浅色调的中层楼房、密集的城中村、棕榈树和福田的公园。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的福田和市民中心",
+      tagline: "口袋里的深圳",
+      about: {
+        intro:
+          "等距像素风的深圳微缩模型：市民中心、平安金融中心和福田中心区、莲花山公园，以及它们周围密集的城市街区。没有人手绘它：每一个街区、每一栋高楼、每一棵棕榈树和每一条小路，都是用代码从开放数据生成的，建筑轮廓、街道、公园和水系取自 OpenStreetMap 和 Overture Maps 基金会。",
+        notes: [
+          "建筑高度来自地图数据；缺少高度时，按楼层数推算。数据有误的地方，地图也会跟着出错。",
+          "地图经过旋转，让福田的路网沿着像素排列。指南针上的北方指向右上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "区",
+      mapLabel: "深圳的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索深圳",
+      splash: "正在点亮高楼…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // Shenzhen Bay teal

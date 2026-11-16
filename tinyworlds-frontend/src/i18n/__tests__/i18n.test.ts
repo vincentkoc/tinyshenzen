@@ -36,7 +36,7 @@ describe("dictionaries", () => {
   it("tell someone with nothing on their page that gifts go by the email they signed in with", () => {
     // a donor who gave under another address must not think the gift is lost
     for (const [locale, dictionary] of Object.entries(DICTIONARIES))
-      expect(dictionary.me.noStonesBody, locale).toMatch(/e-?mail|correo/i);
+      expect(dictionary.me.noStonesBody, locale).toMatch(/e-?mail|correo|邮箱/i);
   });
 
   it("keep the same key caps in the help lines", () => {

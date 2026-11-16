@@ -75,6 +75,28 @@ export const tinyorl: World = {
       searchPlaceholder: "Buscar en Orlando",
       splash: "Llenando los lagos…",
     },
+    "zh-CN": {
+      city: "奥兰多",
+      card: "市中心、湖泊和主题乐园之乡。",
+      title: "tinyorl · 口袋里的奥兰多",
+      description:
+        "用开放数据生成的等距像素风奥兰多及其主题乐园区微缩模型：市中心和伊欧拉湖、众多湖泊、机场、度假区。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的奥兰多市中心和伊欧拉湖",
+      tagline: "口袋里的奥兰多",
+      about: {
+        intro:
+          "等距像素风的奥兰多及其周边主题乐园区微缩模型。没有人手绘它：每一个街区、每一栋高楼、每一片湖和每一棵树，都是用代码从开放数据生成的，建筑轮廓、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "这里的建筑高度来自地图数据。其中有一些明显有误，最离谱的几处已经手动修正。",
+          "地图经过旋转，让市中心的路网沿着像素排列。因此指南针上的北方并不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "城市",
+      mapLabel: "奥兰多的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索奥兰多",
+      splash: "正在给湖泊注水…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the turquoise of a Florida lake

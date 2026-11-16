@@ -337,6 +337,7 @@ describe("waitingLine", () => {
   it("groups thousands as the language does, in its own words", () => {
     expect(waitingLine(1234, "en-US", en)).toBe("1,234 waiting");
     expect(waitingLine(1234, "pt-BR", ptBR)).toBe("1.234 esperando");
+    expect(waitingLine(1234, "zh-CN", DICTIONARIES["zh-CN"])).toBe("1,234 人在等");
   });
 });
 

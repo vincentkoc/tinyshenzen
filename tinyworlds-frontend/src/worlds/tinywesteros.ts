@@ -80,6 +80,28 @@ export const tinywesteros: World = {
       searchPlaceholder: "Buscar en el mundo conocido",
       splash: "Desenrollando el mapa…",
     },
+    "zh-CN": {
+      city: "维斯特洛",
+      card: "整个已知世界，从绝境长城到亚夏。",
+      title: "tinywesteros · 口袋里的已知世界",
+      description:
+        "维斯特洛和厄斯索斯合成的一个等距像素风微缩模型：绝境长城、七大王国、自由贸易城邦、草海、奴隶湾，一直到亚夏，每座重要的城堡和城市都是一个小模型。一张由代码生成的粉丝自制地图。拖动、缩放，随意漫游。",
+      cardAlt: "以等距像素风微缩模型绘制的维斯特洛和厄斯索斯",
+      tagline: "口袋里的已知世界",
+      about: {
+        intro:
+          "维斯特洛和厄斯索斯合成的一个等距像素风微缩模型，从长城以北的土地一直到阴影之地旁的亚夏。这是一个玩具比例的世界：大陆很小，上面的城堡和城市却比应有的大得多，就像战争沙盘上的棋子。没有人手绘它：每一段海岸、每一座山和每一座塔楼，都是用代码生成的。",
+        notes: [
+          "这是一个非官方的粉丝自制微缩模型，与乔治·R·R·马丁（George R. R. Martin）及 HBO 没有任何关联，也未获得其认可。",
+          "地理是为这张地图虚构的：从零画起，由代码生成，并非描摹任何官方地图。地名来自原著，但这里每段海岸的形状和每个地方的确切位置都只是近似。",
+        ],
+      },
+      hoodLines: { label: "地区", inSentence: "地区" },
+      borough: "地区",
+      mapLabel: "维斯特洛和厄斯索斯的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索已知世界",
+      splash: "正在展开地图…",
+    },
   },
   // never shown: a made-up place has no data to credit (the corner says "fan-made" in the visitor's language)
   credit: "Fan-made · invented map",

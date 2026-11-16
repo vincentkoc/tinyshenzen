@@ -75,6 +75,28 @@ export const tinylax: World = {
       searchPlaceholder: "Buscar en Los Ángeles",
       splash: "Esquivando el tráfico…",
     },
+    "zh-CN": {
+      city: "洛杉矶",
+      card: "市中心、好莱坞、海滩和盆地。",
+      title: "tinylax · 口袋里的洛杉矶",
+      description:
+        "用开放数据生成的等距像素风洛杉矶微缩模型：市中心的高楼、好莱坞和格里菲斯公园、比佛利山庄、海边的圣莫尼卡和威尼斯、机场、体育场，以及盆地里绵延的棋盘路网。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的洛杉矶市中心",
+      tagline: "口袋里的洛杉矶",
+      about: {
+        intro:
+          "等距像素风的洛杉矶微缩模型：市中心和它的高楼、好莱坞和格里菲斯公园、比佛利山庄、海边的圣莫尼卡和威尼斯、机场，以及它们之间盆地里绵延的棋盘路网。没有人手绘它：每一个街区、每一栋高楼、每一个泳池和每一棵棕榈树，都是用代码从开放数据生成的，建筑轮廓和高度、街道、公园和水系全部取自公开来源。",
+        notes: [
+          "建筑高度来自地图数据，县内几乎每栋建筑都有测量值。其中有一些明显有误，最离谱的几处已经手动修正。",
+          "地图经过旋转，让盆地的路网沿着像素排列。所以市中心那片斜向规划的老路网会横穿像素，指南针上的北方也不朝向正上方。",
+        ],
+      },
+      hoodLines: { label: "街区界线", inSentence: "街区界线" },
+      borough: "城市",
+      mapLabel: "洛杉矶的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索洛杉矶",
+      splash: "正在躲开堵车…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // the blue of a swimming pool under a clear sky

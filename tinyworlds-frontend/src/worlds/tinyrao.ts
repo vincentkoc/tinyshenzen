@@ -75,6 +75,28 @@ export const tinyrao: World = {
       searchPlaceholder: "Buscar en Ribeirão Preto",
       splash: "Levantando los edificios…",
     },
+    "zh-CN": {
+      city: "里贝朗普雷图",
+      card: "整座城市，从市中心的棋盘路网一直到甘蔗田。",
+      title: "tinyrao · 口袋里的里贝朗普雷图",
+      description:
+        "用开放数据逐个街区生成的等距像素风里贝朗普雷图微缩模型。拖动、缩放，搜索整座城市。",
+      cardAlt: "以等距像素画绘制的里贝朗普雷图微缩模型",
+      tagline: "口袋里的里贝朗普雷图",
+      about: {
+        intro:
+          "等距像素风的里贝朗普雷图微缩模型。没有人手绘它：每一个街区、每一栋建筑、每一座广场和每一棵树，都是用代码从开放数据生成的，建筑轮廓、街道、公园和溪流全部取自公开来源。",
+        notes: [
+          "提前说明：这里几乎没有建筑在数据中记录了高度，所以大多数高度是根据卫星图像估算的。城市的布局是真实的；每栋建筑的确切高度则不一定。",
+          "地图经过旋转，让市中心棋盘路网的街道沿着像素笔直排列。因此指南针上的北方不朝上。",
+        ],
+      },
+      hoodLines: { label: "分区", inSentence: "分区" },
+      borough: "区域",
+      mapLabel: "里贝朗普雷图的等距像素画地图。拖动以移动，滚动或双指缩放。",
+      searchPlaceholder: "搜索里贝朗普雷图",
+      splash: "正在竖起天际线…",
+    },
   },
   credit: "© OpenStreetMap · Overture Maps",
   // terra roxa at sunset
