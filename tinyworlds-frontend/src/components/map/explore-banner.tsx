@@ -5,7 +5,7 @@ import { useI18n } from "@/hooks/use-i18n";
 import { placesUrl } from "@/lib/explore";
 import { siteEvent } from "@/lib/site-events";
 import { cn } from "@/lib/utils";
-import { HOME_URL, SITE_ID } from "@/site";
+import { HOME_URL, SHOW_OTHER_WORLDS, SITE_ID } from "@/site";
 import { WORLDS } from "@/worlds";
 
 /** The site's other places: every world but the one this map is of. */
@@ -38,7 +38,8 @@ function Skyline() {
 /**
  * A small sign under the search box that says this map is one of several: how many other
  * places there are, and the way to them. It is always there, for everyone: most visitors land
- * on one map and never see the front page, and nothing about it is worth hiding it for.
+ * on one map and never see the front page. A build that deploys only its own world leaves it
+ * out (SHOW_OTHER_WORLDS in site.ts).
  */
 export function ExploreBanner({
   className,
@@ -48,7 +49,7 @@ export function ExploreBanner({
   style?: React.CSSProperties;
 }) {
   const { t } = useI18n();
-  if (OTHERS.length === 0) return null;
+  if (!SHOW_OTHER_WORLDS || OTHERS.length === 0) return null;
   return (
     // another build of the site, so a plain link
     <a

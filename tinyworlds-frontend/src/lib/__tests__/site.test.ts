@@ -15,6 +15,8 @@ import {
   RANKING_PATH,
   SITE_ID,
   SITE_NAME,
+  SHOW_OTHER_WORLDS,
+  showsOtherWorlds,
   worldCardUrl,
   worldHero,
   worldLoopUrl,
@@ -26,6 +28,14 @@ describe("site", () => {
     expect(SITE_ID).toBe("tinysz-core");
     expect(SITE_NAME).toBe("tinysz");
     expect(HOME_URL).toBe("/");
+  });
+
+  it("does not advertise other worlds unless the build deploys them", () => {
+    expect(SHOW_OTHER_WORLDS).toBe(false);
+    expect(showsOtherWorlds(undefined)).toBe(false);
+    expect(showsOtherWorlds("")).toBe(false);
+    expect(showsOtherWorlds("0")).toBe(false);
+    expect(showsOtherWorlds(" 1 ")).toBe(true);
   });
 
   it("points at the project's source", () => {

@@ -45,6 +45,14 @@ export const CONTACT_URL = `${GITHUB_URL}/issues`;
 
 const trimmed = (value: string | undefined) => (value ?? "").trim().replace(/\/+$/, "");
 
+/**
+ * Whether a map advertises the site's other worlds (the "17 more cities" sign under the search
+ * box). tinysz.com serves only Shenzhen, so the others would be dead ends: off unless a build
+ * that deploys them sets NEXT_PUBLIC_SHOW_OTHER_WORLDS=1.
+ */
+export const showsOtherWorlds = (flag: string | undefined): boolean => (flag ?? "").trim() === "1";
+export const SHOW_OTHER_WORLDS = showsOtherWorlds(process.env.NEXT_PUBLIC_SHOW_OTHER_WORLDS);
+
 /** Where the front page is, from inside a world. */
 export const HOME_URL = (process.env.NEXT_PUBLIC_HOME_URL ?? "").trim() || "/";
 
