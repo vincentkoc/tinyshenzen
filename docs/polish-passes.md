@@ -22,6 +22,7 @@ Higher zoom levels are rebuilt after every pass.
 | 6 | `--polish-tone` | Gives the whole restyle one house tone. Replaces step 5: it reads the tiles from before the seam blend. See [House tone](#house-tone). |
 | 7 | `--polish-gaps --gaps-backup DIR` | Fills holes inside the city: beige voids, ghostly veils, buildings cut off on a tile or window line, and blurry patches. See [Gaps](#gaps). |
 | 8 | `--polish-edges --edges-backup DIR` | Fixes the edge band and the district rims: content washed to white or cut off on a line, roads and motorways that stop dead, roads or bridges over open water. See [Edges](#edges). |
+| 9 | `--polish-redraw JSON --redraw-src C:T --redraw-backup DIR` | Paid, optional: blends freshly restyled windows into listed target regions (pier cut-offs, flat patches, shore wedges, leftover gaps). See [Redraw](#redraw). |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
 windows, `--polish-water` needs them for the district water masks, and
@@ -172,6 +173,37 @@ after changing `edges.py`. `--edges-dry-run` writes only the report.
 `--edges-report DIR` writes `edges.json` (regions by kind, sources, scores
 before and after), `before.jpg` and `after.jpg`. Only the pyramid tiles above
 changed tiles are rebuilt; rerun `--web-tiles` afterwards.
+
+## Redraw
+
+Some spots need new restyle pixels, which cost money. Pick the windows that
+cover each target, restyle them into a separate folder with a hard spend cap,
+then blend them in with `--polish-redraw` (see `lora/redraw.py`):
+
+```bash
+python3 lora/restyle_map.py --chunks /workspace/tinysz-nanshan --out /workspace/redraw-out/nanshan \
+  --windows 'x,y;x,y' --quality medium --budget-usd 70 --budget-ledger /workspace/redraw-out/budget.jsonl
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-redraw targets.json \
+  --redraw-src /workspace/tinysz-nanshan:/workspace/redraw-out/nanshan/tiles-constrained \
+  --redraw-backup /workspace/redraw-out/backup --redraw-report /workspace/redraw-out/report
+```
+
+`--budget-usd` refuses to start a call unless the ledger total plus $0.07 for
+every call in flight stays within the cap. Runs that share `--budget-ledger`
+share the cap. Fog windows are skipped for free. Run `water_constrain.constrain`
+on the new windows before blending, as for the original restyle.
+
+`targets.json` maps a category (`A_…`, `B_…`, `C_…`, `D_…`) to grid-pixel
+boxes. Boxes within 32 px of each other are merged. A, B and C boxes are
+redrawn whole; D boxes only where the gap score is still above 0.15. Only
+cells where a new window still draws the original's geometry are filled, with
+the gaps pass's tone correction. A fill is dropped if it raises the gap score
+(A/B/C, tolerance 0.02) or does not lower it by 0.03 (D-only). The backup and
+report work like the edges pass: `redraw.json` lists each region as kept,
+dropped, no-window or nothing.
+
+Do not rerun `--polish-edges` from its old backup afterwards: it starts from
+the tiles it backed up, which would undo the redraw.
 
 ## Spots file
 
