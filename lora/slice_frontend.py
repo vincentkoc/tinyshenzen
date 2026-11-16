@@ -4792,6 +4792,358 @@ def polish_gaps(
     return present, changed
 
 
+# --- edges: fix the restyle's broken edges (see edges.py) ------------------
+
+_EDGES: dict = {}
+
+
+def edges_rects(grid: dict, districts: list[dict] | None) -> list[tuple[int, int, int, int]]:
+    """Each district's restyle rectangle in grid pixels."""
+    out = []
+    for d in districts or []:
+        x0, y0 = d["origin"][0] - grid["ox"], d["origin"][1] - grid["oy"]
+        out.append((x0, y0, x0 + d["width"], y0 + d["height"]))
+    return out
+
+
+def _edges_tile(key: tuple[int, int]):
+    import edges as E
+
+    tx, ty = key
+    cur = _gaps_src_tile(f"{tx}_{ty}.webp")
+    orig = _gaps_load(_GAPS["orig0"] / f"{tx}_{ty}.webp")
+    if cur is None or orig is None:
+        return tx, ty, None
+    F = E.cell_fields(cur, orig)
+    return tx, ty, np.concatenate([np.atleast_3d(F[k]) for k in E.FIELD_KEYS], axis=-1).astype(np.float32)
+
+
+def _edges_unstack(stack: np.ndarray) -> dict:
+    import edges as E
+
+    out, i = {}, 0
+    for k in E.FIELD_KEYS:
+        n = 3 if k in ("cl", "ol") else 1
+        out[k] = stack[..., i : i + n] if n == 3 else stack[..., i]
+        i += n
+    return out
+
+
+def edges_fields(work: Path, keys: list[tuple[int, int]], grid: dict, workers: int = 8) -> dict:
+    """Global cell fields for `keys` (cached in work/fields.npz, resumable by tile)."""
+    import multiprocessing as mp
+
+    import edges as E
+
+    C = TILE // E.CELL
+    cache = work / "fields.npz"
+    have: dict[tuple[int, int], np.ndarray] = {}
+    if cache.exists():
+        z = np.load(cache)
+        if str(z["version"]) == E.EDGE_VERSION:
+            for (tx, ty), st in zip(z["keys"].tolist(), z["stack"]):
+                have[(tx, ty)] = st
+    todo = [k for k in keys if k not in have]
+    t0 = time.time()
+    if todo:
+        with mp.get_context("fork").Pool(workers) as pool:
+            for n, (tx, ty, st) in enumerate(pool.imap_unordered(_edges_tile, todo, chunksize=4), 1):
+                if st is not None:
+                    have[(tx, ty)] = st
+                if n % 200 == 0 or n == len(todo):
+                    print(f"  edges fields {n}/{len(todo)}, {time.time() - t0:.0f}s", flush=True)
+                    ks = sorted(have)
+                    tmp = work / "fields.tmp.npz"
+                    np.savez(tmp, version=E.EDGE_VERSION, keys=np.array(ks, np.int32).reshape(-1, 2),
+                             stack=np.stack([have[k] for k in ks]) if ks else np.zeros((0, C, C, 21), np.float32))
+                    tmp.replace(cache)
+    H, W = grid["rows"] * C, grid["cols"] * C
+    nch = next(iter(have.values())).shape[-1] if have else 21
+    big = np.zeros((H, W, nch), np.float32)
+    ok = np.zeros((H, W), bool)
+    want = set(keys)
+    for (tx, ty), st in have.items():
+        if (tx, ty) not in want:
+            continue
+        big[ty * C : (ty + 1) * C, tx * C : (tx + 1) * C] = st
+        ok[ty * C : (ty + 1) * C, tx * C : (tx + 1) * C] = True
+    F = _edges_unstack(big)
+    F["ok"] = ok
+    return F
+
+
+EDGES_ABSENT_FADE = 96  # px: fixes fade out toward a z0 tile the map does not have (no straight cut at its edge)
+
+
+def _edges_present_ramp(box: tuple[int, int, int, int]) -> np.ndarray:
+    """0..1 per px over a grid-pixel box: 1 well inside present tiles, 0 at the edge
+    of an absent tile, where the viewer shows its page colour."""
+    x0, y0, x1, y1 = box
+    r = EDGES_ABSENT_FADE
+    X0, Y0, X1, Y1 = x0 - r, y0 - r, x1 + r, y1 + r
+    m = np.zeros((Y1 - Y0, X1 - X0), np.float32)
+    for ty in range(max(0, Y0 // TILE), (Y1 - 1) // TILE + 1):
+        for tx in range(max(0, X0 // TILE), (X1 - 1) // TILE + 1):
+            if (tx, ty) in _EDGES["present"]:
+                m[max(Y0, ty * TILE) - Y0 : min(Y1, (ty + 1) * TILE) - Y0,
+                  max(X0, tx * TILE) - X0 : min(X1, (tx + 1) * TILE) - X0] = 1.0
+    if m.min() >= 1.0:
+        return np.ones((y1 - y0, x1 - x0), np.float32)
+    import tone as TN
+
+    b = TN._box(TN._box(m, r, 0), r, 1) / float((2 * r + 1) ** 2)
+    return (TN.smoothstep(b, 0.5, 1.0) * m)[r : r + y1 - y0, r : r + x1 - x0].astype(np.float32)
+
+
+def _edges_fix_one(job):
+    import edges as E
+    import gaps as GP
+
+    kind, gid, block = job
+    path = _EDGES["work"] / "fix" / f"{kind}-{gid}-{block[0]}-{block[1]}.npz"
+    if path.exists():
+        return path
+    C = E.CELL
+    M = GP.GAP_MARGIN
+    W, H = _GAPS["W"], _GAPS["H"]
+    bx0, by0, bx1, by1 = block
+    box = (max(0, bx0 - M), max(0, by0 - M), min(W, bx1 + M), min(H, by1 + M))
+    cs = np.s_[box[1] // C : box[3] // C, box[0] // C : box[2] // C]
+    lab = _EDGES["lab"][kind][cs]
+    sc = _EDGES["score"][kind][cs]
+    region = lab == gid
+    good = (sc < 0.15) & (_EDGES["cont"][cs] > 0.5) & (lab == 0)
+    cur = _gaps_read_crop(_GAPS["src"], box)
+    orig = _gaps_read_crop(_GAPS["orig0"], box, fill=(0, 0, 0))
+    inb = np.zeros(cur.shape[:2], bool)
+    inb[by0 - box[1] : by1 - box[1], bx0 - box[0] : bx1 - box[0]] = True
+    inb_c = inb[::C, ::C][: region.shape[0], : region.shape[1]]
+    found = []
+    if kind == "veil":
+        found = _gaps_window_crops(box, np.repeat(np.repeat(region, C, 0), C, 1))
+    fill, alpha, used = E.fix_region(kind, cur, orig, _EDGES["style"], region, sc, good, [(w[0], w[1]) for w in found])
+    alpha = alpha * inb * _edges_present_ramp(box)
+    out = E.blend(cur, fill, alpha)
+    # Re-score only around the region's part in this block (3 cells of context).
+    rb = region & inb_c
+    ys, xs = np.nonzero(rb)
+    if len(ys):
+        cy0, cy1 = max(0, ys.min() - 3), min(rb.shape[0], ys.max() + 4)
+        cx0, cx1 = max(0, xs.min() - 3), min(rb.shape[1], xs.max() + 4)
+    else:
+        cy0, cy1, cx0, cx1 = 0, rb.shape[0], 0, rb.shape[1]
+    vs = np.s_[cy0 * C : cy1 * C, cx0 * C : cx1 * C]
+    ok, before, after = E.verify(kind, cur[vs], out[vs], orig[vs], _EDGES["style"], rb[cy0:cy1, cx0:cx1])
+    if not ok:
+        alpha = np.zeros_like(alpha)
+        used = [{"source": "kept"}]
+    for u in used:
+        if u.get("source") == "window" and "index" in u:
+            u.update(found[u.pop("index")][2])
+    used = [dict(u, score_before=round(before, 3), score_after=round(after, 3)) for u in used]
+    sl = np.s_[by0 - box[1] : by1 - box[1], bx0 - box[0] : bx1 - box[0]]
+    tmp = path.with_suffix(".tmp.npz")
+    np.savez(tmp, block=np.array(block), fill=fill[sl], alpha=alpha[sl].astype(np.float16),
+             used=np.array(json.dumps(used)))
+    tmp.replace(path)
+    return path
+
+
+def _edges_compose_tile(item):
+    """Compose every kept fix over one z0 tile (in KINDS order) and write it when it changed."""
+    (tx, ty), paths = item
+    name = f"{tx}_{ty}.webp"
+    src = _gaps_src_tile(name)
+    if src is None:
+        return tx, ty, False
+    t = src.astype(np.float32)
+    touched = False
+    for p in paths:
+        z = np.load(p)
+        bx0, by0, bx1, by1 = (int(v) for v in z["block"])
+        a = z["alpha"].astype(np.float32)
+        if float(a.max()) <= 2e-3:
+            continue
+        ix0, iy0 = max(bx0, tx * TILE), max(by0, ty * TILE)
+        ix1, iy1 = min(bx1, (tx + 1) * TILE), min(by1, (ty + 1) * TILE)
+        if ix1 <= ix0 or iy1 <= iy0:
+            continue
+        sa = a[iy0 - by0 : iy1 - by0, ix0 - bx0 : ix1 - bx0]
+        if float(sa.max()) <= 2e-3:
+            continue
+        sf = z["fill"][iy0 - by0 : iy1 - by0, ix0 - bx0 : ix1 - bx0].astype(np.float32)
+        ts = np.s_[iy0 - ty * TILE : iy1 - ty * TILE, ix0 - tx * TILE : ix1 - tx * TILE]
+        t[ts] = t[ts] * (1.0 - sa[..., None]) + sf * sa[..., None]
+        touched = True
+    out = np.clip(np.rint(t), 0, 255).astype(np.uint8)
+    dest0, backup0 = _EDGES["dest0"], _EDGES["backup0"]
+    cur = _gaps_load(dest0 / name)
+    if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+        return tx, ty, touched and int(np.abs(src.astype(np.int16) - out.astype(np.int16)).max()) > 1
+    if backup0 is not None and not (backup0 / name).exists():
+        shutil.copy2(dest0 / name, backup0 / name)
+    _atomic_save_webp(Image.fromarray(out, "RGB"), dest0 / name, lossless=True)
+    return tx, ty, int(np.abs(src.astype(np.int16) - out.astype(np.int16)).max()) > 1
+
+
+def polish_edges(
+    dest: Path,
+    grid: dict,
+    *,
+    proc_dest: Path | None,
+    districts: list[dict] | None,
+    backup: Path,
+    report: Path | None = None,
+    dry_run: bool = False,
+    workers: int = 8,
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Find and fix the restyle's broken edges for free (see edges.py).
+
+    Audits the edge band (vignette field above edges.EDGE_DEEP) and every
+    district rim. Re-runs start from the z0 copies in `backup/0`, so they land
+    on the same tiles; work is cached in `backup/work` (cell fields, the house
+    style, one file per fixed block), so an interrupted run resumes. With
+    `dry_run`, only the report (edges.json, before.jpg) is written.
+    Returns (present, changed).
+    """
+    import multiprocessing as mp
+
+    import edges as E
+    import gaps as GP
+    import tone as TN
+
+    t0 = time.time()
+    if proc_dest is None or not (proc_dest / "0").is_dir():
+        raise SystemExit("--polish-edges needs the procedural tiles (the original the restyle was made from)")
+    cols, rows = grid["cols"], grid["rows"]
+    C = TILE // E.CELL
+    present = present_from_disk(dest, cols, rows)
+    backup0 = backup / "0"
+    backup0.mkdir(parents=True, exist_ok=True)
+    work = backup / "work"
+    (work / "fix").mkdir(parents=True, exist_ok=True)
+    stamp = work / "stamp.txt"
+    if stamp.exists() and stamp.read_text().strip() != E.EDGE_VERSION:
+        shutil.rmtree(work)
+        (work / "fix").mkdir(parents=True, exist_ok=True)
+    stamp.write_text(E.EDGE_VERSION + "\n")
+    src = [backup0, dest / "0"]
+    _GAPS.update(grid=grid, districts=districts or [], src=src, orig0=proc_dest / "0", H=rows * TILE, W=cols * TILE)
+    field = np.load(dest / ".vignette-dist.npz")["field"]
+    rects = edges_rects(grid, districts)
+    audit, outer = E.band_weight(field, (rows * C, cols * C), rects, field_scale=VIGNETTE_SCALE)
+    band_tiles = {(tx, ty) for (tx, ty) in present
+                  if audit[ty * C : (ty + 1) * C, tx * C : (tx + 1) * C].any()}
+    deep = sorted(present - band_tiles)
+    sample = deep[:: max(1, len(deep) // 400)]
+    keys = sorted(band_tiles | set(sample))
+    print(f"  edges: {len(band_tiles)} band tiles, {len(sample)} interior tiles for the house style", flush=True)
+    F = edges_fields(work, keys, grid, workers)
+    style_path = work / "style.pkl"
+    if style_path.exists():
+        style = pickle.loads(style_path.read_bytes())
+    else:
+        inner = np.zeros_like(audit)
+        for tx, ty in sample:
+            inner[ty * C : (ty + 1) * C, tx * C : (tx + 1) * C] = True
+        v = inner & F["ok"] & (E.content_weight(F) > 0.5) & (F["ncc"] > 0.4)
+        style = TN.fit_house_style(F["ol"][v], F["cl"][v])
+        style_path.write_bytes(pickle.dumps(style))
+    S = E.scores(F, style)
+    xl, yl = tone_candidate_lines(grid, districts)
+    zone = audit & F["ok"]
+    labs, scs, found = {}, {}, []
+    for kind in E.KINDS:
+        sk = S[kind] * zone * (outer if kind == "ghost" else 1.0)
+        void = S["white"] if kind == "veil" else np.zeros_like(sk)
+        regs, lab = GP.find_gaps(sk, void, xl, yl, min_cells=8)
+        labs[kind], scs[kind] = lab, sk
+        for g in regs:
+            r = g.row()
+            sub = {"void": "white", "cutoff": "cutoff", "blur": "veil"}[g.kind] if kind == "veil" else kind
+            if kind == "road":
+                x0, y0, x1, y1 = g.bbox
+                ys, xs = slice(max(0, y0 - 3), y1 + 3), slice(max(0, x0 - 3), x1 + 3)
+                reg = lab[ys, xs] == g.id
+                ring = GP.soft(reg, 1.5) > 0.05
+                ring &= ~reg
+                cont = ring & (F["orr"][ys, xs] > 0.1) & (F["rk"][ys, xs] > 0.6)
+                sub = "road-cut" if cont.any() else "road-missing"
+            r.update(kind=f"{kind}/{sub}" if sub != kind else kind, pass_kind=kind, sub=sub)
+            found.append((kind, g, r))
+    counts: dict[str, int] = {}
+    for _, _, r in found:
+        counts[r["kind"]] = counts.get(r["kind"], 0) + 1
+    print(f"  edges: {len(found)} regions {counts}, {time.time() - t0:.0f}s", flush=True)
+    _EDGES.update(work=work, lab=labs, score=scs, cont=S["cont"], style=style, present=present,
+                  dest0=dest / "0", backup0=backup0)
+    del F
+    rows_out = sorted((r for _, _, r in found), key=lambda r: -r["rank"])
+    if report is not None:
+        report.mkdir(parents=True, exist_ok=True)
+        (report / "edges.json").write_text(json.dumps(
+            {"version": E.EDGE_VERSION, "counts": counts, "regions": rows_out}, indent=1) + "\n")
+        before = [backup0, dest / "0"]
+        gaps_sheet(rows_out, [[proc_dest / "0"], before], report / "before.jpg")
+    if dry_run:
+        _GAPS.clear(); _EDGES.clear()
+        return present, set()
+    B = E.EDGE_BLOCK
+    jobs = []
+    for kind, g, _ in found:
+        x0, y0, x1, y1 = (v * E.CELL for v in g.bbox)
+        for by in range(y0 // B * B, y1, B):
+            for bx in range(x0 // B * B, x1, B):
+                blk = (bx, by, min(bx + B, cols * TILE), min(by + B, rows * TILE))
+                cs = np.s_[blk[1] // E.CELL : blk[3] // E.CELL, blk[0] // E.CELL : blk[2] // E.CELL]
+                if (labs[kind][cs] == g.id).any():
+                    jobs.append((kind, g.id, blk))
+    print(f"  edges: {len(jobs)} blocks to fix", flush=True)
+    with mp.get_context("fork").Pool(workers) as pool:
+        for n, _ in enumerate(pool.imap_unordered(_edges_fix_one, jobs, chunksize=1), 1):
+            if n % 25 == 0 or n == len(jobs):
+                print(f"  edges fixed {n}/{len(jobs)}, {time.time() - t0:.0f}s", flush=True)
+    used_by: dict[tuple[str, int], list] = {}
+    per_tile: dict[tuple[int, int], list[tuple[int, Path]]] = {}
+    order = {k: i for i, k in enumerate(E.KINDS)}
+    for kind, gid, blk in jobs:
+        p = work / "fix" / f"{kind}-{gid}-{blk[0]}-{blk[1]}.npz"
+        z = np.load(p)
+        used_by.setdefault((kind, gid), []).extend(json.loads(str(z["used"])))
+        if float(z["alpha"].max()) <= 2e-3:
+            continue
+        for ty in range(blk[1] // TILE, (blk[3] - 1) // TILE + 1):
+            for tx in range(blk[0] // TILE, (blk[2] - 1) // TILE + 1):
+                if (tx, ty) in present:
+                    per_tile.setdefault((tx, ty), []).append((order[kind], p))
+    items = [(k, [p for _, p in sorted(v, key=lambda e: (e[0], str(e[1])))]) for k, v in sorted(per_tile.items())]
+    # A tile an earlier run changed but this one does not: put the original back.
+    for p in sorted(backup0.glob("*.webp")):
+        tx, ty = (int(v) for v in p.stem.split("_"))
+        if (tx, ty) not in per_tile:
+            items.append(((tx, ty), []))
+    changed: set[tuple[int, int]] = set()
+    with mp.get_context("fork").Pool(workers) as pool:
+        for tx, ty, ch in pool.imap_unordered(_edges_compose_tile, items, chunksize=2):
+            if ch or (backup0 / f"{tx}_{ty}.webp").exists():
+                changed.add((tx, ty))
+    print(f"  edges: {len(changed)} z0 tiles changed, {time.time() - t0:.0f}s", flush=True)
+    if report is not None:
+        for r in rows_out:
+            r["used"] = used_by.get((r["pass_kind"], r["id"]), [])
+        fixed: dict[str, int] = {}
+        for r in rows_out:
+            if any(u.get("source") != "kept" for u in r["used"]):
+                fixed[r["kind"]] = fixed.get(r["kind"], 0) + 1
+        (report / "edges.json").write_text(json.dumps(
+            {"version": E.EDGE_VERSION, "counts": counts, "fixed": fixed, "regions": rows_out,
+             "changed": sorted([list(t) for t in changed])}, indent=1) + "\n")
+        gaps_sheet(rows_out, [[proc_dest / "0"], [backup0, dest / "0"], [dest / "0"]], report / "after.jpg")
+    _GAPS.clear()
+    _EDGES.clear()
+    return present, changed
+
+
 def write_overview_from_z0(dest: Path, grid: dict, out_dir: Path, max_width: int = 2048, pad_rgb: tuple[int, int, int] = (0x1A, 0x1E, 0x1C),
                            overlay: Path | None = None) -> dict:
     """Build overview.webp from z0 tiles, without a full-resolution canvas.
@@ -4949,6 +5301,30 @@ def main() -> None:
         help="with --polish-gaps in place: copy each z0 tile to DIR/0 before changing it",
     )
     ap.add_argument(
+        "--polish-edges",
+        action="store_true",
+        help="after --polish-gaps: fix the restyle's broken edges (washed or cut-off content, roads that stop dead, roads or bridges over nothing, half-faded smudges past the map) in the edge band and along district rims (free, no API; see edges.py)",
+    )
+    ap.add_argument(
+        "--edges-backup",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="with --polish-edges (required): copy each z0 tile to DIR/0 before changing it; re-runs start from those copies; DIR/work caches the fields and fixes so an interrupted run resumes",
+    )
+    ap.add_argument(
+        "--edges-report",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="with --polish-edges: write edges.json (regions by kind, sources used), before.jpg and after.jpg (worst 40: original, before, after)",
+    )
+    ap.add_argument(
+        "--edges-dry-run",
+        action="store_true",
+        help="with --polish-edges: detect and write the report only; leave the map alone",
+    )
+    ap.add_argument(
         "--tone-region",
         default="",
         metavar="TX0,TY0,TX1,TY1",
@@ -5065,7 +5441,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.polish_edges or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -5092,6 +5468,26 @@ def main() -> None:
             existing = json.loads((args.out / "manifest.json").read_text())
             restyle_levels = existing["levels"]
             args._manifest_dir = target
+        elif args.polish_edges:
+            if args.edges_backup is None:
+                raise SystemExit("--polish-edges needs --edges-backup DIR")
+            print(f"  edges → {dest}", flush=True)
+            z0_present, changed = polish_edges(
+                dest, grid,
+                proc_dest=proc_dest,
+                districts=districts,
+                backup=args.edges_backup,
+                report=args.edges_report,
+                dry_run=args.edges_dry_run,
+            )
+            if not changed:
+                print("  edges: nothing to change", flush=True)
+                return
+            written = rebuild_parents(dest, dest, changed, grid, z0_present, pad_rgb=VIEW_FOG)
+            print(f"  edges: rebuilt {written} pyramid tiles above them", flush=True)
+            overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
+            existing = json.loads((args.out / "manifest.json").read_text())
+            restyle_levels = existing["levels"]
         elif args.polish:
             print(f"  polishing restyle z0 → {dest}", flush=True)
             z0_present = polish_z0_tiles(
@@ -5162,7 +5558,7 @@ def main() -> None:
         else:
             z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
             print(f"  pyramid-only from {len(z0_present)} existing z0 tiles", flush=True)
-        if not args.polish_gaps:
+        if not (args.polish_gaps or args.polish_edges):
             # Viewer fog as pad: missing children blend into the page, no dark stairs.
             restyle_levels = _pyramid_from_z0(dest, grid, {0: z0_present}, pad_rgb=VIEW_FOG)
             overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
