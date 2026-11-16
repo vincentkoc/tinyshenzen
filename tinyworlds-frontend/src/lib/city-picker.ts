@@ -90,15 +90,21 @@ export function pickerOptions(
 
 const REGION_NAMES = new Map<string, (cc: string) => string>();
 
+/** Where the site's copy names a region differently from the browser's table, by language. */
+const REGION_LABELS: Record<string, Record<string, string>> = {
+  "zh-CN": { TW: "中国台湾" },
+};
+
 /** Country names in a language ("GB" → "United Kingdom", "Reino Unido"); the code itself if the browser cannot say. */
 export function regionNames(locale: string): (cc: string) => string {
   let name = REGION_NAMES.get(locale);
   if (!name) {
+    const labels = REGION_LABELS[locale] ?? {};
     try {
       const names = new Intl.DisplayNames([locale], { type: "region" });
-      name = (cc) => names.of(cc) ?? cc;
+      name = (cc) => labels[cc] ?? names.of(cc) ?? cc;
     } catch {
-      name = (cc) => cc;
+      name = (cc) => labels[cc] ?? cc;
     }
     REGION_NAMES.set(locale, name);
   }

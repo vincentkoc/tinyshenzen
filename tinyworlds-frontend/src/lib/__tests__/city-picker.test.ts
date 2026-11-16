@@ -240,6 +240,8 @@ describe("regionNames", () => {
     expect(regionNames("en-US")("GB")).toBe("United Kingdom");
     expect(regionNames("pt-BR")("GB")).toBe("Reino Unido");
     expect(regionNames("es-ES")("US")).toBe("Estados Unidos");
+    expect(regionNames("zh-CN")("TW")).toBe("中国台湾");
+    expect(regionNames("zh-CN")("JP")).toBe("日本");
   });
 });
 
