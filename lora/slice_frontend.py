@@ -4738,43 +4738,10 @@ def polish_gaps(
     with ctx.Pool(workers) as pool:
         for n, (gid, box, fill, alpha, used) in enumerate(pool.imap_unordered(_gaps_fill_one, found, chunksize=1), 1):
             used_by[gid] = used
-            x0, y0, x1, y1 = box
-            a = alpha.astype(np.float32)
-            for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
-                for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
-                    if (tx, ty) not in present:
-                        continue
-                    ix0, iy0 = max(x0, tx * TILE), max(y0, ty * TILE)
-                    ix1, iy1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
-                    sa = a[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0]
-                    if float(sa.max()) <= 2e-3:
-                        continue
-                    if (tx, ty) not in tiles:
-                        tiles[(tx, ty)] = _gaps_src_tile(f"{tx}_{ty}.webp").astype(np.float32)
-                    t = tiles[(tx, ty)]
-                    ts = np.s_[iy0 - ty * TILE : iy1 - ty * TILE, ix0 - tx * TILE : ix1 - tx * TILE]
-                    sf = fill[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0].astype(np.float32)
-                    t[ts] = t[ts] * (1.0 - sa[..., None]) + sf * sa[..., None]
+            _blend_into_tiles(tiles, present, box, fill, alpha)
             if n % 50 == 0:
                 print(f"  gaps filled {n}/{len(found)}, {len(tiles)} tiles, {time.time() - t0:.0f}s", flush=True)
-    changed: set[tuple[int, int]] = set()
-    if backup is not None and stage is None:
-        (backup / "0").mkdir(parents=True, exist_ok=True)
-        # A tile an earlier run changed but this one does not: put the original back.
-        for p in sorted((backup / "0").glob("*.webp")):
-            tx, ty = (int(v) for v in p.stem.split("_"))
-            if (tx, ty) not in tiles:
-                tiles[(tx, ty)] = _gaps_load(p).astype(np.float32)
-    for (tx, ty), arr in sorted(tiles.items()):
-        out = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
-        src = dest / "0" / f"{tx}_{ty}.webp"
-        cur = _gaps_load(src)
-        if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
-            continue
-        if backup is not None and stage is None and not (backup / "0" / src.name).exists():
-            shutil.copy2(src, backup / "0" / src.name)
-        _atomic_save_webp(Image.fromarray(out, "RGB"), out0 / src.name, lossless=True)
-        changed.add((tx, ty))
+    changed = _write_changed_tiles(tiles, dest, out0, backup if stage is None else None)
     print(f"  gaps: {len(changed)} z0 tiles changed, {time.time() - t0:.0f}s", flush=True)
     if report is not None:
         report.mkdir(parents=True, exist_ok=True)
@@ -4788,6 +4755,193 @@ def polish_gaps(
              "changed": sorted([list(t) for t in changed])}, indent=1) + "\n")
         before = [backup / "0"] if (backup is not None and (backup / "0").is_dir()) else []
         gaps_sheet(rows_out, [[proc_dest / "0"], before + [dest / "0"], [out0, dest / "0"]], report / "sheet.jpg")
+    _GAPS.clear()
+    return present, changed
+
+
+# --- redraw: blend a paid redraw of chosen windows (see redraw.py) ---------
+
+
+def _redraw_style(dest: Path, proc0: Path, present: set[tuple[int, int]], cache: Path) -> dict:
+    """House style (original Lab -> restyle Lab) fit on a sample of intact cells; cached."""
+    import gaps as GP
+    import tone as TN
+
+    if cache.exists():
+        return pickle.loads(cache.read_bytes())
+    keys = sorted(present)
+    src, dst = [], []
+    for tx, ty in keys[:: max(1, len(keys) // 300)]:
+        cur = _gaps_load(dest / "0" / f"{tx}_{ty}.webp")
+        orig = _gaps_load(proc0 / f"{tx}_{ty}.webp")
+        if cur is None or orig is None:
+            continue
+        st = GP.cell_structure(cur, orig)
+        ok = st["ncc"] > 0.4
+        cl, _ = GP.cell_detail(cur)
+        ol, _ = GP.cell_detail(orig)
+        src.append(ol[ok])
+        dst.append(cl[ok])
+    style = TN.fit_house_style(np.concatenate(src), np.concatenate(dst))
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_bytes(pickle.dumps(style))
+    return style
+
+
+def _redraw_one(target: dict):
+    """Fill one merged target from the redraw windows. Returns (box, fill, alpha, row)."""
+    import gaps as GP
+    import redraw as RD
+
+    C = GP.GAP_CELL
+    M = GP.GAP_MARGIN
+    W, H = _GAPS["W"], _GAPS["H"]
+    x0, y0, x1, y1 = target["box"]
+    box = (max(0, (x0 - M) // C * C), max(0, (y0 - M) // C * C),
+           min(W, -(-(x1 + M) // C) * C), min(H, -(-(y1 + M) // C) * C))
+    row = {"px_box": list(target["box"]), "kind": "+".join(RD.category(c) for c in target["cats"]),
+           "cats": target["cats"], "parts": len(target["parts"]),
+           "area_px": (x1 - x0) * (y1 - y0), "tiles": [[x0 // TILE, y0 // TILE]]}
+    cur = _gaps_read_crop(_GAPS["src"], box)
+    orig = _gaps_read_crop(_GAPS["orig0"], box, fill=(0x1A, 0x1E, 0x1C))
+    city = RD.city_cells(orig)
+    lab, det = GP.cell_detail(cur)
+    score, _ = GP.gap_score(lab, det, city, GP.cell_structure(cur, orig))
+    region = RD.target_region(target["parts"], box, score, city)
+    none = np.zeros(cur.shape[:2], np.float16)
+    if int(region.sum()) < RD.REDRAW_MIN_CELLS:
+        return box, cur, none, dict(row, result="nothing", cells=int(region.sum()))
+    region_px = np.repeat(np.repeat(region, C, 0), C, 1)
+    wins = _gaps_window_crops(box, region_px)
+    ch, cw = region.shape
+    cover = np.zeros_like(region)
+    for rgb, cov, _meta in wins:
+        covered = cov[: ch * C, : cw * C].reshape(ch, C, cw, C).mean((1, 3)) > 0.99
+        cover |= GP.window_good(GP.cell_structure(rgb, orig), covered)
+    todo = region & cover
+    if int(todo.sum()) < RD.REDRAW_MIN_CELLS:
+        return box, cur, none, dict(row, result="no-window", cells=int(region.sum()), windows=len(wins))
+    good = (score < 0.15) & (city > 0.5) & ~region
+    fill, alpha, used = GP.fill_region(cur, orig, _GAPS["style"], todo, score, good,
+                                       [(w[0], w[1]) for w in wins], pure=True)
+    a = alpha[..., None]
+    blended = np.clip(np.rint(cur * (1.0 - a) + fill * a), 0, 255).astype(np.uint8)
+    before = GP.region_score(cur, orig, city, todo)
+    after = GP.region_score(blended, orig, city, todo)
+    row.update(cells=int(region.sum()), filled=int(todo.sum()), windows=len(wins),
+               score_before=round(before, 3), score_after=round(after, 3))
+    for u in used:
+        if u["source"] == "window":
+            u.update(wins[u.pop("index")][2])
+    row["used"] = used
+    if not RD.keep_fill(target["cats"], before, after):
+        return box, cur, none, dict(row, result="dropped")
+    return box, fill, alpha.astype(np.float16), dict(row, result="kept")
+
+
+def _blend_into_tiles(tiles: dict, present: set[tuple[int, int]], box, fill: np.ndarray, alpha: np.ndarray) -> None:
+    """Alpha-blend a crop fill into the z0 tiles it covers (loaded lazily from _GAPS['src'])."""
+    x0, y0, x1, y1 = box
+    a = alpha.astype(np.float32)
+    for ty in range(y0 // TILE, (y1 - 1) // TILE + 1):
+        for tx in range(x0 // TILE, (x1 - 1) // TILE + 1):
+            if (tx, ty) not in present:
+                continue
+            ix0, iy0 = max(x0, tx * TILE), max(y0, ty * TILE)
+            ix1, iy1 = min(x1, (tx + 1) * TILE), min(y1, (ty + 1) * TILE)
+            sa = a[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0]
+            if float(sa.max()) <= 2e-3:
+                continue
+            if (tx, ty) not in tiles:
+                tiles[(tx, ty)] = _gaps_src_tile(f"{tx}_{ty}.webp").astype(np.float32)
+            t = tiles[(tx, ty)]
+            ts = np.s_[iy0 - ty * TILE : iy1 - ty * TILE, ix0 - tx * TILE : ix1 - tx * TILE]
+            sf = fill[iy0 - y0 : iy1 - y0, ix0 - x0 : ix1 - x0].astype(np.float32)
+            t[ts] = t[ts] * (1.0 - sa[..., None]) + sf * sa[..., None]
+
+
+def _write_changed_tiles(tiles: dict, dest: Path, out0: Path, backup: Path | None) -> set[tuple[int, int]]:
+    """Save tiles that differ from what is on disk; copy each original to backup/0 first.
+    A tile a previous run changed but this one does not gets its original back."""
+    if backup is not None:
+        (backup / "0").mkdir(parents=True, exist_ok=True)
+        for p in sorted((backup / "0").glob("*.webp")):
+            tx, ty = (int(v) for v in p.stem.split("_"))
+            if (tx, ty) not in tiles:
+                tiles[(tx, ty)] = _gaps_load(p).astype(np.float32)
+    changed: set[tuple[int, int]] = set()
+    for (tx, ty), arr in sorted(tiles.items()):
+        out = np.clip(np.rint(arr), 0, 255).astype(np.uint8)
+        src = dest / "0" / f"{tx}_{ty}.webp"
+        cur = _gaps_load(src)
+        if cur is not None and int(np.abs(cur.astype(np.int16) - out.astype(np.int16)).max()) <= 1:
+            continue
+        if backup is not None and not (backup / "0" / src.name).exists():
+            shutil.copy2(src, backup / "0" / src.name)
+        _atomic_save_webp(Image.fromarray(out, "RGB"), out0 / src.name, lossless=True)
+        changed.add((tx, ty))
+    return changed
+
+
+def polish_redraw(
+    dest: Path,
+    grid: dict,
+    *,
+    proc_dest: Path | None,
+    targets: Path,
+    sources: list[dict],
+    backup: Path,
+    report: Path | None = None,
+    workers: int = 8,
+) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
+    """Blend a paid redraw (fresh restyle windows in `sources`) into the target regions.
+
+    `targets` is json {category: [[x0, y0, x1, y1] grid px, ...]} (see redraw.py).
+    Re-runs start from the z0 copies in `backup/0`. `report` gets redraw.json
+    (each target kept, dropped or without a source) and a contact sheet.
+    Returns (present, changed).
+    """
+    import multiprocessing as mp
+
+    import redraw as RD
+
+    t0 = time.time()
+    if proc_dest is None or not (proc_dest / "0").is_dir():
+        raise SystemExit("--polish-redraw needs the procedural tiles (the original the restyle was made from)")
+    cols, rows = grid["cols"], grid["rows"]
+    present = present_from_disk(dest, cols, rows)
+    backup0 = backup / "0"
+    backup0.mkdir(parents=True, exist_ok=True)
+    src = [backup0, dest / "0"]
+    raw = json.loads(targets.read_text())
+    items = [(cat, tuple(b)) for cat, boxes in sorted(raw.items()) for b in boxes]
+    merged = RD.merge_boxes(items)
+    print(f"  redraw: {len(items)} targets → {len(merged)} merged regions", flush=True)
+    style = _redraw_style(dest, proc_dest / "0", present, backup / "work" / "style.pkl")
+    _GAPS.update(grid=grid, districts=sources, src=src, orig0=proc_dest / "0", style=style,
+                 H=rows * TILE, W=cols * TILE)
+    tiles: dict[tuple[int, int], np.ndarray] = {}
+    rows_out = []
+    ctx = mp.get_context("fork")
+    with ctx.Pool(workers) as pool:
+        for n, (box, fill, alpha, row) in enumerate(pool.imap_unordered(_redraw_one, merged, chunksize=1), 1):
+            rows_out.append(row)
+            if row["result"] == "kept":
+                _blend_into_tiles(tiles, present, box, fill, alpha)
+            if n % 25 == 0:
+                print(f"  redraw {n}/{len(merged)}, {len(tiles)} tiles, {time.time() - t0:.0f}s", flush=True)
+    changed = _write_changed_tiles(tiles, dest, dest / "0", backup)
+    counts = {k: sum(1 for r in rows_out if r["result"] == k) for k in ("kept", "dropped", "no-window", "nothing")}
+    print(f"  redraw: {counts}, {len(changed)} z0 tiles changed, {time.time() - t0:.0f}s", flush=True)
+    if report is not None:
+        report.mkdir(parents=True, exist_ok=True)
+        rows_out.sort(key=lambda r: -r["area_px"])
+        (report / "redraw.json").write_text(json.dumps(
+            {"version": RD.REDRAW_VERSION, "counts": counts, "regions": rows_out,
+             "changed": sorted([list(t) for t in changed])}, indent=1) + "\n")
+        kept = [r for r in rows_out if r["result"] == "kept"]
+        gaps_sheet(kept, [[proc_dest / "0"], [backup0, dest / "0"], [dest / "0"]], report / "sheet.jpg",
+                   titles=None)
     _GAPS.clear()
     return present, changed
 
@@ -5248,6 +5402,25 @@ def main() -> None:
         help="with --polish-water/--polish-forest: fade featureless ground near the edge (flat fill, gray puddles, white lots) into the fog with a soft mask (free, idempotent)",
     )
     ap.add_argument(
+        "--polish-redraw",
+        type=Path,
+        default=None,
+        metavar="JSON",
+        help="blend a paid redraw into target regions: JSON {category: [[x0,y0,x1,y1] grid px]} (see redraw.py); "
+             "needs --redraw-src and --redraw-backup. Drops any fill that makes the gap score worse",
+    )
+    ap.add_argument(
+        "--redraw-src",
+        action="append",
+        default=[],
+        metavar="CHUNKS:TILES",
+        help="with --polish-redraw: a district's chunks dir and its redrawn window PNGs (repeatable)",
+    )
+    ap.add_argument("--redraw-backup", type=Path, default=None, metavar="DIR",
+                    help="with --polish-redraw (required): z0 copies before change; re-runs start from them")
+    ap.add_argument("--redraw-report", type=Path, default=None, metavar="DIR",
+                    help="with --polish-redraw: write redraw.json and sheet.jpg (original, before, after)")
+    ap.add_argument(
         "--polish-fogline",
         action="store_true",
         help="last: fade fog-dominated pixels near the edge (dashed traces, gray-washed windows, straight cut-offs) to beige with a feathered, wobbled ramp (free, idempotent)",
@@ -5441,7 +5614,7 @@ def main() -> None:
     proc_levels = None
     pad_rgb = (0x1A, 0x1E, 0x1C)
 
-    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.polish_edges or args.pyramid_only:
+    if args.polish or args.polish_edge or args.polish_vignette or args.polish_water or args.polish_forest or args.polish_flats or args.polish_fogline or args.polish_mint or args.polish_spots or args.polish_seams or args.polish_tone or args.polish_gaps or args.polish_edges or args.polish_redraw or args.pyramid_only:
         dest = args.out / args.restyle_dir
         if not (dest / "0").is_dir():
             raise SystemExit(f"--polish/--polish-edge/--polish-vignette/--pyramid-only needs existing z0 tiles at {dest / '0'}")
@@ -5468,6 +5641,27 @@ def main() -> None:
             existing = json.loads((args.out / "manifest.json").read_text())
             restyle_levels = existing["levels"]
             args._manifest_dir = target
+        elif args.polish_redraw:
+            if args.redraw_backup is None or not args.redraw_src:
+                raise SystemExit("--polish-redraw needs --redraw-src CHUNKS:TILES and --redraw-backup DIR")
+            sources = [load_district(s, world_geo) for s in args.redraw_src]
+            print(f"  redraw → {dest}", flush=True)
+            z0_present, changed = polish_redraw(
+                dest, grid,
+                proc_dest=proc_dest,
+                targets=args.polish_redraw,
+                sources=sources,
+                backup=args.redraw_backup,
+                report=args.redraw_report,
+            )
+            if not changed:
+                print("  redraw: nothing to change", flush=True)
+                return
+            written = rebuild_parents(dest, dest, changed, grid, z0_present, pad_rgb=VIEW_FOG)
+            print(f"  redraw: rebuilt {written} pyramid tiles above them", flush=True)
+            overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
+            existing = json.loads((args.out / "manifest.json").read_text())
+            restyle_levels = existing["levels"]
         elif args.polish_edges:
             if args.edges_backup is None:
                 raise SystemExit("--polish-edges needs --edges-backup DIR")
@@ -5558,7 +5752,7 @@ def main() -> None:
         else:
             z0_present = present_from_disk(dest, grid["cols"], grid["rows"])
             print(f"  pyramid-only from {len(z0_present)} existing z0 tiles", flush=True)
-        if not (args.polish_gaps or args.polish_edges):
+        if not (args.polish_gaps or args.polish_edges or args.polish_redraw):
             # Viewer fog as pad: missing children blend into the page, no dark stairs.
             restyle_levels = _pyramid_from_z0(dest, grid, {0: z0_present}, pad_rgb=VIEW_FOG)
             overview = write_overview_from_z0(dest, grid, args.out, pad_rgb=VIEW_FOG)
