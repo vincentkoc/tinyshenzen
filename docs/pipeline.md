@@ -121,6 +121,28 @@ python3 lora/slice_frontend.py "${CORE[@]}" --polish-tone   # supersedes --polis
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-gaps --gaps-backup /workspace/tinysz-core-z0-backup-gaps
 ```
 
+Then build the compressed web pyramid the live site serves (free, idempotent,
+needs libwebp's `cwebp` on `PATH` or in `CWEBP`):
+
+```bash
+python3 lora/slice_frontend.py "${CORE[@]}" --web-tiles   # or: python3 lora/web_tiles.py --out <world dir>
+```
+
+The polish passes write lossless z0 tiles to `tiles-restyled/` (about 250 KB
+each, 1.4 GB for the core map). `--web-tiles` never touches them. It writes
+`tiles-web/` next to them: z0 re-encoded with cwebp `-q 80 -m 6 -sharp_yuv`
+(about 61 KB each, 347 MB), with near-lossless 60 for tiles of fine checker
+dither, where lossy 4:2:0 smears the colours (PSNR under 28 dB), and the
+original bytes for any tile that would not get smaller; z1 and up, already
+lossy and small, are hard-linked. The manifest's `restyle` becomes
+`{"dir": "tiles-web", "encoding": {...the parameters..., "source": "tiles-restyled"}}`
+and `build` is bumped. The parameters live in `lora/web_tiles.py`; changing
+them re-encodes every tile on the next run. A rerun only redoes tiles whose
+source is newer, and removes tiles that left the source.
+
+Every other `slice_frontend.py` run rewrites the manifest back to
+`tiles-restyled`, so run `--web-tiles` again as the last step after any polish.
+
 Finally, index the world so search and the restyle field stay on the manifest,
 and open the viewer:
 
