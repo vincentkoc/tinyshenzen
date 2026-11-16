@@ -119,7 +119,11 @@ python3 lora/slice_frontend.py "${CORE[@]}" --polish-fogline
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-mint --polish-spots lora/spots/tinysz-core.json
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-tone   # supersedes --polish-seams
 python3 lora/slice_frontend.py "${CORE[@]}" --polish-gaps --gaps-backup /workspace/tinysz-core-z0-backup-gaps
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-coverage /tmp/coverage.geojson --coverage-backup /workspace/tinysz-core-z0-backup-coverage
 ```
+
+The last step needs the coverage outline from the pipeline first:
+`(cd tinyworlds-pipeline && npm run cli -- --city tinysz-core coverage --out /tmp/coverage.geojson)`.
 
 Then build the compressed web pyramid the live site serves (free, idempotent,
 needs libwebp's `cwebp` on `PATH` or in `CWEBP`):

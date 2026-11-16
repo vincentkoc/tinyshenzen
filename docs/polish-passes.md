@@ -23,6 +23,7 @@ Higher zoom levels are rebuilt after every pass.
 | 7 | `--polish-gaps --gaps-backup DIR` | Fills holes inside the city: beige voids, ghostly veils, buildings cut off on a tile or window line, and blurry patches. See [Gaps](#gaps). |
 | 8 | `--polish-edges --edges-backup DIR` | Fixes the edge band and the district rims: content washed to white or cut off on a line, roads and motorways that stop dead, roads or bridges over open water. See [Edges](#edges). |
 | 9 | `--polish-redraw JSON --redraw-src C:T --redraw-backup DIR` | Paid, optional: blends freshly restyled windows into listed target regions (pier cut-offs, flat patches, shore wedges, leftover gaps). See [Redraw](#redraw). |
+| 10 | `--polish-coverage GEOJSON --coverage-backup DIR` | Last: fades both layers out along the city's coverage outline and drops tiles left blank. See [Coverage](#coverage). |
 
 `--polish-vignette` needs `--district` arguments to reslice from the source
 windows, `--polish-water` needs them for the district water masks, and
@@ -204,6 +205,31 @@ dropped, no-window or nothing.
 
 Do not rerun `--polish-edges` from its old backup afterwards: it starts from
 the tiles it backed up, which would undo the redraw.
+
+## Coverage
+
+A city can carry a `coverage` outline (`City.coverage` in the pipeline). The
+pipeline's fog and index already stop at it; `--polish-coverage` brings
+existing tiles in line without a re-render:
+
+```bash
+(cd tinyworlds-pipeline && npm run cli -- --city tinysz-core coverage --out /tmp/coverage.geojson)
+python3 lora/slice_frontend.py "${CORE[@]}" --polish-coverage /tmp/coverage.geojson \
+  --coverage-backup /workspace/tinysz-core-z0-backup-coverage
+python3 lora/slice_frontend.py "${CORE[@]}" --web-tiles
+```
+
+For the restyle and the procedural layer alike, z0 tiles that cross the
+outline fade to the viewer fog along the vignette's smoothstep ramp (from 32 px
+inside to 320 px outside, the isoline wobbled by the shared noise), and tiles
+that are paper right up to their edges are dropped, so they leave the manifest's bitset. Both
+pyramids and the overview are rebuilt. The original of every tile it changes
+or drops is kept under `--coverage-backup DIR/<layer>/0/`, with a
+`coverage.json` listing them; a re-run starts from those copies. The bucket
+keeps the old objects too, since `upload-data.sh` never deletes.
+
+Run it after every other polish pass: the other passes start from their own
+source snapshots, which predate it.
 
 ## Spots file
 
