@@ -31,10 +31,10 @@ export const BUILT_CITIES: string[] = Object.values(WORLDS).flatMap((world) => [
 ]);
 
 /** The project's source. */
-export const GITHUB_URL = "https://github.com/vincentkoc/tinyshenzen";
+export const GITHUB_URL = "https://github.com/vincentkoc/tinyshenzhen";
 
 /** Where to write about the project: questions, ideas, a city someone wants to see. */
-export const CONTACT_EMAIL = "github.com/vincentkoc/tinyshenzen";
+export const CONTACT_EMAIL = "github.com/vincentkoc/tinyshenzhen";
 export const CONTACT_URL = `${GITHUB_URL}/issues`;
 
 const trimmed = (value: string | undefined) => (value ?? "").trim().replace(/\/+$/, "");

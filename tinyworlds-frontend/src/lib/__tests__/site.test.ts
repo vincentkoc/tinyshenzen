@@ -27,7 +27,7 @@ describe("site", () => {
   });
 
   it("points at the project's source", () => {
-    expect(GITHUB_URL).toBe("https://github.com/vincentkoc/tinyshenzen");
+    expect(GITHUB_URL).toBe("https://github.com/vincentkoc/tinyshenzhen");
   });
 
   it("finds each world, and its share card, in the world's own folder", () => {
@@ -76,8 +76,8 @@ describe("site", () => {
   });
 
   it("says where to write about the project", () => {
-    expect(CONTACT_EMAIL).toBe("github.com/vincentkoc/tinyshenzen");
-    expect(CONTACT_URL).toBe("https://github.com/vincentkoc/tinyshenzen/issues");
+    expect(CONTACT_EMAIL).toBe("github.com/vincentkoc/tinyshenzhen");
+    expect(CONTACT_URL).toBe("https://github.com/vincentkoc/tinyshenzhen/issues");
   });
 
   it("knows which places are already worlds, under every name a donor might type", () => {
