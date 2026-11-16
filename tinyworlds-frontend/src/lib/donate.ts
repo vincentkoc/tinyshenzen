@@ -1,4 +1,5 @@
 import type { Locale } from "@/i18n/locale";
+import { SPONSOR_URL } from "@/site";
 
 /**
  * Donations. Two ways in, both optional and both named by the build environment:
@@ -9,7 +10,8 @@ import type { Locale } from "@/i18n/locale";
  *
  * With the API the donor picks a city here and sees how far each is from being built; the links
  * are then the fallback, because donating must never depend on the API being up. With neither,
- * nothing about donating is shown.
+ * the Donate button goes to GitHub Sponsors (`SPONSOR_URL`) in a new tab, so the heart is never
+ * hidden just because this build has no Stripe or API.
  */
 
 type Links = Record<Locale, string>;
@@ -23,6 +25,8 @@ export const DONATE_LINKS: Links = {
 
 /** The GraphQL endpoint: a full URL or a same-origin path. Empty when the build has no API. */
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
+
+export { SPONSOR_URL };
 
 /** What the hosted checkout calls each of our languages. */
 export const CHECKOUT_LOCALE: Record<Locale, string> = {
@@ -62,6 +66,34 @@ export function paymentLinkFor(
   links: Links = DONATE_LINKS,
 ): string | null {
   return donateUrl(links[locale] || links["en-US"], worldId, locale);
+}
+
+/**
+ * Whether this build can open a Stripe or API checkout for a language and world: an API, or a
+ * payment link for that language (or the English fallback).
+ */
+export function hasCheckout(
+  locale: Locale,
+  worldId: string,
+  apiUrl: string = API_URL,
+  links: Links = DONATE_LINKS,
+): boolean {
+  return apiUrl !== "" || paymentLinkFor(locale, worldId, links) !== null;
+}
+
+/**
+ * What the Donate button does. A configured checkout (the city-goal dialog) wins; otherwise the
+ * button is a link to GitHub Sponsors.
+ */
+export function donateAction(
+  locale: Locale,
+  worldId: string,
+  apiUrl: string = API_URL,
+  links: Links = DONATE_LINKS,
+  sponsorUrl: string = SPONSOR_URL,
+): { kind: "checkout" } | { kind: "sponsor"; url: string } {
+  if (hasCheckout(locale, worldId, apiUrl, links)) return { kind: "checkout" };
+  return { kind: "sponsor", url: sponsorUrl };
 }
 
 // ---------------------------------------------------------------------------------------------

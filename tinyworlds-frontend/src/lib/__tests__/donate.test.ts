@@ -9,9 +9,11 @@ import {
   CITY_MAX,
   clampAmount,
   donationsLabel,
+  donateAction,
   donateMode,
   donateUrl,
   formatUsd,
+  hasCheckout,
   isCheckoutUrl,
   parseAmount,
   parseMilestones,
@@ -19,6 +21,7 @@ import {
   progress,
   readDonated,
   returnUrlOf,
+  SPONSOR_URL,
   usdSymbol,
   withTimeout,
 } from "../donate";
@@ -84,6 +87,44 @@ describe("paymentLinkFor", () => {
     // a link for another language is no use without a default
     expect(paymentLinkFor("en-US", "tinynyc", { ...NO_LINKS, "pt-BR": LINK })).toBeNull();
     expect(paymentLinkFor("pt-BR", "tinynyc", { ...NO_LINKS, "pt-BR": LINK })).not.toBeNull();
+  });
+});
+
+describe("hasCheckout", () => {
+  it("is true when the API is set, even without a payment link", () => {
+    expect(hasCheckout("en-US", "tinysz-core", "https://example.com/api/graphql", NO_LINKS)).toBe(
+      true,
+    );
+  });
+
+  it("is true when a payment link is set, even without an API", () => {
+    expect(hasCheckout("en-US", "tinysz-core", "", { ...NO_LINKS, "en-US": LINK })).toBe(true);
+  });
+
+  it("is false when this build names neither", () => {
+    expect(hasCheckout("en-US", "tinysz-core", "", NO_LINKS)).toBe(false);
+  });
+});
+
+describe("donateAction", () => {
+  it("falls back to GitHub Sponsors when this build has no checkout", () => {
+    expect(donateAction("en-US", "tinysz-core", "", NO_LINKS)).toEqual({
+      kind: "sponsor",
+      url: SPONSOR_URL,
+    });
+    expect(SPONSOR_URL).toBe("https://github.com/sponsors/vincentkoc");
+  });
+
+  it("uses the checkout when a payment link is set", () => {
+    expect(donateAction("en-US", "tinysz-core", "", { ...NO_LINKS, "en-US": LINK })).toEqual({
+      kind: "checkout",
+    });
+  });
+
+  it("uses the checkout when the API is set, even without a link", () => {
+    expect(
+      donateAction("en-US", "tinysz-core", "https://example.com/api/graphql", NO_LINKS),
+    ).toEqual({ kind: "checkout" });
   });
 });
 
