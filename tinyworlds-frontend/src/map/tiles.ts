@@ -48,6 +48,17 @@ export class Pyramid {
     this.maxZ = maxZ;
   }
 
+  /** The finest level there is: 0 in every data set so far. */
+  get minZ(): number {
+    return Math.min(...this.levels.keys());
+  }
+
+  /** Columns and rows of level z's grid, or null when there is no such level. */
+  grid(z: number): { cols: number; rows: number } | null {
+    const l = this.levels.get(z);
+    return l ? { cols: l.cols, rows: l.rows } : null;
+  }
+
   hasLevel(z: number): boolean {
     return this.levels.has(z);
   }
