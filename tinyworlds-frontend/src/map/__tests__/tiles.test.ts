@@ -225,4 +225,44 @@ describe("planTiles", () => {
     expect(keys).toContain("0/5_2");
     expect(keys).not.toContain("0/3_2");
   });
+
+  it("holds the ring back until the visible tiles are drawable", () => {
+    const loading = planTiles(
+      pyramid,
+      view,
+      () => false,
+      () => false,
+      { ringAfterVisible: true },
+    );
+    expect(loading.wanted.some((w) => w.pri === 2)).toBe(false);
+    expect(loading.wanted.some((w) => w.pri === 0)).toBe(true);
+
+    const drawn = new Set(["0/4_2"]);
+    const after = planTiles(
+      pyramid,
+      view,
+      (key) => drawn.has(key),
+      (key) => drawn.has(key),
+      { ringAfterVisible: true },
+    );
+    expect(after.wanted.some((w) => w.pri === 2)).toBe(true);
+  });
+
+  it("reaches only part of a tile past the view with a short ring reach", () => {
+    const corner = { ...view, right: 200, bottom: 200, x: 100, y: 100 };
+    const keys = (reach?: number) =>
+      planTiles(
+        pyramid,
+        corner,
+        () => false,
+        () => false,
+        { ringReach: reach },
+      )
+        .wanted.filter((w) => w.pri === 2)
+        .map((w) => tileKey(w.z, w.tx, w.ty));
+    expect(keys()).toContain("0/5_2");
+    const near = keys(0.5);
+    expect(near).not.toContain("0/5_2"); // 312 px past the view edge, beyond half a tile
+    expect(near).toContain("0/4_1"); // right above the view
+  });
 });

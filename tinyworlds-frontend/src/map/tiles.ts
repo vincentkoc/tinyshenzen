@@ -208,6 +208,13 @@ export interface PlanOptions {
   /** rank by distance to this map-px point; defaults to the view centre */
   aimX?: number;
   aimY?: number;
+  /** hold the ring back until every on-screen native tile is drawable */
+  ringAfterVisible?: boolean;
+  /**
+   * How far one ring step reaches, as a fraction of a tile (0 < f <= 1; default 1). At 0.5
+   * the ring only takes tiles within half a tile of the view edge, not the whole next row.
+   */
+  ringReach?: number;
 }
 
 /**
@@ -224,7 +231,17 @@ export function planTiles(
   const z = levelForScale(view.scale * Math.min(view.dpr, 2), pyramid.maxZ);
   const range = pyramid.range(z, view);
   const ring = options.ring ?? PREFETCH_RING;
-  const padded = extendRange(pyramid, range, ring, options.aheadTx ?? 0, options.aheadTy ?? 0);
+  const reach = options.ringReach ?? 1;
+  const padded =
+    ring > 0 && reach > 0 && reach < 1
+      ? extendRange(
+          pyramid,
+          pyramid.range(z, growRect(view, ring * reach * pyramid.span(z))),
+          0,
+          options.aheadTx ?? 0,
+          options.aheadTy ?? 0,
+        )
+      : extendRange(pyramid, range, ring, options.aheadTx ?? 0, options.aheadTy ?? 0);
   const wanted: TileRequest[] = [];
   const retain: { z: number; tx: number; ty: number }[] = [];
   const seen = new Set<string>();
@@ -269,18 +286,33 @@ export function planTiles(
     }
   }
 
+  let visiblePending = false;
+  if (options.ringAfterVisible && !options.deferNative) {
+    for (let ty = range.ty0; ty <= range.ty1 && !visiblePending; ty++)
+      for (let tx = range.tx0; tx <= range.tx1; tx++)
+        if (pyramid.has(z, tx, ty) && !ready(tileKey(z, tx, ty))) {
+          visiblePending = true;
+          break;
+        }
+  }
+
   for (let ty = padded.ty0; ty <= padded.ty1; ty++) {
     for (let tx = padded.tx0; tx <= padded.tx1; tx++) {
       if (!pyramid.has(z, tx, ty)) continue;
       if (tx >= range.tx0 && tx <= range.tx1 && ty >= range.ty0 && ty <= range.ty1) continue;
       const dist = distTo(z, tx, ty);
       keep(z, tx, ty);
-      want(z, tx, ty, 2, dist);
+      if (!visiblePending) want(z, tx, ty, 2, dist);
     }
   }
 
   wanted.sort((a, b) => a.pri - b.pri || a.dist - b.dist);
   return { z, range, wanted, retain };
+}
+
+/** A map-px rectangle grown by `px` on every side. */
+function growRect(r: Rect, px: number): Rect {
+  return { left: r.left - px, top: r.top - px, right: r.right + px, bottom: r.bottom + px };
 }
 
 /** Pad a range by `ring` on every side, then stretch it in the direction of a pan. */
