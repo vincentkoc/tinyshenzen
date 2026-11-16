@@ -201,6 +201,40 @@ ensure_pages_domain() {
   echo "Attached ${domain} to ${PROJECT}."
 }
 
+# Pages custom domains stay "CNAME record not set" until the zone has a proxied
+# CNAME to the project's pages.dev host; the Pages API does not create it.
+ensure_pages_cname() {
+  local zid="$1" name="$2" target="$3" existing id
+  cf_req GET "/zones/${zid}/dns_records?name=${name}"
+  if ! cf_success "${CF_RESPONSE}"; then
+    cf_fail "Could not read DNS records for ${name}" "${CF_RESPONSE}"
+    return 1
+  fi
+  existing="$(printf '%s' "${CF_RESPONSE}" | jq -c '.result[0] // empty')"
+  local body
+  body="$(jq -nc --arg name "${name}" --arg target "${target}" \
+    '{type: "CNAME", name: $name, content: $target, proxied: true, ttl: 1}')"
+  if [[ -n "${existing}" ]]; then
+    if [[ "$(jq -r '.type + " " + .content + " " + (.proxied|tostring)' <<<"${existing}")" == "CNAME ${target} true" ]]; then
+      echo "DNS ${name} → ${target} already set."
+      return 0
+    fi
+    if [[ "$(jq -r '.type' <<<"${existing}")" != "CNAME" ]]; then
+      echo "DNS ${name} has a $(jq -r '.type' <<<"${existing}") record; leaving it alone." >&2
+      return 1
+    fi
+    id="$(jq -r '.id' <<<"${existing}")"
+    cf_req PUT "/zones/${zid}/dns_records/${id}" "${body}"
+  else
+    cf_req POST "/zones/${zid}/dns_records" "${body}"
+  fi
+  if ! cf_success "${CF_RESPONSE}"; then
+    cf_fail "Could not set DNS ${name} → ${target}" "${CF_RESPONSE}"
+    return 1
+  fi
+  echo "DNS ${name} → ${target} (proxied)."
+}
+
 # 301 www.tinysz.com -> https://tinysz.com, preserving path and query.
 # Uses a zone Single Redirect so both hostnames can stay on the Pages project.
 ensure_www_redirect() {
@@ -284,6 +318,8 @@ set_cors "${PAGES_HOST}"
 ensure_r2_custom_domain "${ZONE_ID}"
 ensure_pages_domain "${SITE_DOMAIN}"
 ensure_pages_domain "www.${SITE_DOMAIN}"
+ensure_pages_cname "${ZONE_ID}" "${SITE_DOMAIN}" "${PAGES_HOST}"
+ensure_pages_cname "${ZONE_ID}" "www.${SITE_DOMAIN}" "${PAGES_HOST}"
 ensure_www_redirect "${ZONE_ID}"
 
 echo "Setup complete."
