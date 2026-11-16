@@ -4988,7 +4988,19 @@ def main() -> None:
     ap.add_argument("--name", default="", help="manifest name (default: the chunks meta city id)")
     ap.add_argument("--start-lon", type=float, default=None)
     ap.add_argument("--start-lat", type=float, default=None)
+    ap.add_argument(
+        "--web-tiles",
+        action="store_true",
+        help="build the compressed web pyramid (tiles-web/) from --restyle-dir, point the manifest at it, and stop (free, idempotent; see web_tiles.py)",
+    )
+    ap.add_argument("--web-dir", default="tiles-web", help="with --web-tiles: the web pyramid dir (default tiles-web)")
     args = ap.parse_args()
+
+    if args.web_tiles:
+        import web_tiles as WT
+
+        WT.build_web_tiles(args.out, args.restyle_dir, args.web_dir)
+        return
 
     import tiles as T
 
