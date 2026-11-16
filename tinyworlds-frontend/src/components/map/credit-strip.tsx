@@ -5,6 +5,7 @@ import { useI18n } from "@/hooks/use-i18n";
 import { viewReadout } from "@/lib/readout";
 import { cn } from "@/lib/utils";
 import type { MapEngine } from "@/map/engine";
+import { AUTHOR_URL } from "@/site";
 import { WORLD } from "@/worlds";
 
 interface CreditStripProps {
@@ -75,6 +76,15 @@ export function CreditStrip({ engine, onAbout, className, style }: CreditStripPr
           </>
         )}
       </button>
+      <span aria-hidden className="h-3 w-px bg-sign-line" />
+      <a
+        href={AUTHOR_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="rounded-sm whitespace-nowrap outline-none hover:text-paper focus-visible:text-taxi"
+      >
+        {t.credit.madeBy}
+      </a>
     </div>
   );
 }

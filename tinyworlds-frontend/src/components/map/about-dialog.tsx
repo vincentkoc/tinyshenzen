@@ -22,7 +22,15 @@ import { useI18n } from "@/hooks/use-i18n";
 import { consentStore, GTM_ID } from "@/lib/consent";
 import { API_URL } from "@/lib/donate";
 import { cn } from "@/lib/utils";
-import { CONTACT_URL, GITHUB_URL, HOME_URL, ME_URL, PRIVACY_URL, TERMS_URL } from "@/site";
+import {
+  AUTHOR_URL,
+  CONTACT_URL,
+  GITHUB_URL,
+  HOME_URL,
+  ME_URL,
+  PRIVACY_URL,
+  TERMS_URL,
+} from "@/site";
 import { WORLD } from "@/worlds";
 import { Wordmark } from "./wordmark";
 
@@ -34,6 +42,8 @@ interface AboutDialogProps {
   hoodLines: boolean;
   /** absent when this build takes no donations */
   onDonate?: () => void;
+  /** a GitHub Sponsors address, used when there is no checkout dialog to open */
+  donateHref?: string;
   /** "Become a benefactor of {city}": opens the donate sign with that city chosen */
   onBecome?: (cityName: string) => void;
 }
@@ -81,6 +91,7 @@ export function AboutDialog({
   attribution,
   hoodLines,
   onDonate,
+  donateHref,
   onBecome,
 }: AboutDialogProps) {
   const { t, copy } = useI18n();
@@ -97,6 +108,11 @@ export function AboutDialog({
           <DialogDescription className="text-[15px] leading-relaxed text-paper">
             {copy.about.intro}
           </DialogDescription>
+          <p>
+            <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" className={QUIET}>
+              {t.about.madeBy}
+            </a>
+          </p>
         </DialogHeader>
 
         <div className="space-y-4 px-5 pt-4 pb-5 text-sm leading-relaxed text-paper-dim">
@@ -162,11 +178,18 @@ export function AboutDialog({
           )}
 
           <nav className="flex flex-wrap gap-x-5 gap-y-2 border-t border-sign-line pt-4">
-            {onDonate && (
-              <button type="button" onClick={onDonate} className={QUIET}>
+            {donateHref ? (
+              <a href={donateHref} target="_blank" rel="noopener noreferrer" className={QUIET}>
                 <Heart aria-hidden className="size-3.5 fill-taxi text-taxi" strokeWidth={2.25} />
                 {t.donate.action}
-              </button>
+              </a>
+            ) : (
+              onDonate && (
+                <button type="button" onClick={onDonate} className={QUIET}>
+                  <Heart aria-hidden className="size-3.5 fill-taxi text-taxi" strokeWidth={2.25} />
+                  {t.donate.action}
+                </button>
+              )
             )}
             <a href={HOME_URL} className={QUIET}>
               <LayoutGrid aria-hidden className="size-3.5 text-paper-dim" strokeWidth={2.25} />
