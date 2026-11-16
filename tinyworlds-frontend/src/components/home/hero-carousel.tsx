@@ -32,7 +32,14 @@ const ARROW =
  * it is a picture and a sign, as it was. On a narrow screen the sign hangs from the picture's
  * edge instead of covering it.
  */
-export function HeroCarousel({ takesDonations }: { takesDonations: boolean }) {
+export function HeroCarousel({
+  takesDonations,
+  sponsorUrl,
+}: {
+  takesDonations: boolean;
+  /** when there is no checkout, the heart is a Donate link to GitHub Sponsors */
+  sponsorUrl?: string;
+}) {
   const { t, locale } = useI18n();
   const [current, setCurrent] = useState(0);
   // the slide the current one is coming in over; gone once the fade is
@@ -203,11 +210,23 @@ export function HeroCarousel({ takesDonations }: { takesDonations: boolean }) {
               {t.home.exploreShort}
               <ArrowUpRight aria-hidden className="size-4" strokeWidth={2.5} />
             </a>
-            {takesDonations && (
-              <a href="#ranking" className={ACTION_QUIET}>
+            {sponsorUrl ? (
+              <a
+                href={sponsorUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={ACTION_QUIET}
+              >
                 <Heart aria-hidden className="size-4" strokeWidth={2.25} />
-                {t.home.fundNext}
+                {t.donate.action}
               </a>
+            ) : (
+              takesDonations && (
+                <a href="#ranking" className={ACTION_QUIET}>
+                  <Heart aria-hidden className="size-4" strokeWidth={2.25} />
+                  {t.home.fundNext}
+                </a>
+              )
             )}
           </div>
         </div>

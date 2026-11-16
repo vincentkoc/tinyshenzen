@@ -29,12 +29,13 @@ import { useWall } from "@/hooks/use-wall";
 import { useWorldVisits } from "@/hooks/use-world-visits";
 import { broughtByWorld, type BroughtWorld } from "@/lib/brought-by";
 import { rankCities } from "@/lib/city-picker";
-import { API_URL, paymentLinkFor, type CityMilestone } from "@/lib/donate";
+import { API_URL, donateAction, type CityMilestone } from "@/lib/donate";
 import { type ListKey } from "@/lib/lists";
 import { cn } from "@/lib/utils";
 import { byVisits, siteTotals, type WorldCounts } from "@/lib/visits";
 import {
   ADMIN_PATH,
+  AUTHOR_URL,
   CONTACT_EMAIL,
   CONTACT_URL,
   GITHUB_URL,
@@ -184,7 +185,9 @@ export function Landing() {
     slug: city.slug,
     name: city.name,
   });
-  const takesDonations = API_URL !== "" || paymentLinkFor(locale, SITE_ID) !== null;
+  const action = donateAction(locale, SITE_ID);
+  const takesDonations = action.kind === "checkout";
+  const sponsorUrl = action.kind === "sponsor" ? action.url : undefined;
   // the real cities first, then the places that only exist in stories; each group most visited
   // first, by the first counts that came (the registry's order until then)
   const visits = useWorldVisits(WORLD_IDS);
@@ -248,12 +251,25 @@ export function Landing() {
                 </a>
               </li>
             )}
-            {takesDonations && (
+            {takesDonations ? (
               <li>
                 <a href="#ranking" className={TOP_LINK}>
                   {t.home.ranking}
                 </a>
               </li>
+            ) : (
+              sponsorUrl && (
+                <li>
+                  <a
+                    href={sponsorUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={TOP_LINK}
+                  >
+                    {t.donate.action}
+                  </a>
+                </li>
+              )
             )}
             {withApi && (
               <li>
@@ -279,7 +295,7 @@ export function Landing() {
           )}
         </nav>
 
-        <HeroCarousel takesDonations={takesDonations} />
+        <HeroCarousel takesDonations={takesDonations} sponsorUrl={sponsorUrl} />
 
         {withApi && (
           <SiteNumbers
@@ -371,6 +387,24 @@ export function Landing() {
           {afterEmail}
         </p>
         <p>{t.home.credits}</p>
+        <p>
+          <a href={AUTHOR_URL} target="_blank" rel="noopener noreferrer" className={FOOTER_LINK}>
+            {t.about.madeBy}
+          </a>
+          {sponsorUrl && (
+            <>
+              {" · "}
+              <a
+                href={sponsorUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={FOOTER_LINK}
+              >
+                {t.donate.action}
+              </a>
+            </>
+          )}
+        </p>
         <p className="flex flex-wrap gap-x-4 gap-y-1.5">
           <LegalLinks className={FOOTER_LINK} cookies />
         </p>
