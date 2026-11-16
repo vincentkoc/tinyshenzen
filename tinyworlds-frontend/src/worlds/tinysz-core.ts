@@ -39,7 +39,7 @@ export const tinyszCore: World = {
       tagline: "Shenzhen, em miniatura",
       about: {
         intro:
-          "Shenzhen como uma miniatura isométrica em pixel art: Shekou e Houhai em Nanshan, o Centro Cívico e o Ping An Finance Centre em Futian, Dongmen e a fronteira de Luohu a leste. Ninguém desenhou nada à mão: cada quarteirão, torre, palmeira e caminho é gerado por código a partir de dados abertos. O contorno dos prédios, as ruas, os parques e a água vêm do OpenStreetMap e da Overture Maps Foundation.",
+          "Shenzhen como uma miniatura isométrica em pixel art: Shekou e Houhai em Nanshan, o Centro Cívico e o Ping An Finance Centre em Futian, Dongmen e o porto de Luohu a leste. Ninguém desenhou nada à mão: cada quarteirão, torre, palmeira e caminho é gerado por código a partir de dados abertos. O contorno dos prédios, as ruas, os parques e a água vêm do OpenStreetMap e da Overture Maps Foundation.",
         notes: [
           "As alturas dos prédios vêm dos dados do mapa, ou do número de andares quando a altura não está marcada. Onde o dado está errado, o mapa também está.",
           "O mapa está girado para que as ruas de Futian corram ao longo dos pixels. O norte da bússola aponta para cima e para a direita.",
