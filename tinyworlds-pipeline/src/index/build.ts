@@ -3,6 +3,7 @@ import path from "node:path";
 import { DuckDBBlobValue, DuckDBInstance, type DuckDBConnection, type DuckDBValue } from "@duckdb/node-api";
 import type { Areas, Polygons } from "../cities/types.js";
 import { CITY, DIRS } from "../config.js";
+import { coverageTest, insidePolygons } from "../geom/coverage.js";
 import { GeomKind, readWkb } from "../geom/wkb.js";
 import { makeProjection, type Projection } from "../projection.js";
 import { fillPolygon } from "../render/raster.js";
@@ -15,6 +16,7 @@ import { stampIndexes } from "./stamp.js";
 import { writeSights } from "./write-sights.js";
 import type { Source } from "./sights.js";
 import { loadExtensions } from "../duckdb.js";
+import { BUILDING_KEPT, LAND_USE_KEPT, PLACE_KEPT } from "../scene/filters.js";
 
 /**
  * The viewer's indexes: what can be searched for (places.json), the outlines of the city's
@@ -171,6 +173,34 @@ export function districtLookup(
   };
 }
 
+/**
+ * Land use the maps leave out (see scene/filters.ts), as a point test: nothing inside it is listed.
+ */
+async function leftOutAreas(
+  conn: DuckDBConnection,
+  file: string,
+): Promise<(lon: number, lat: number) => boolean> {
+  const shapes: { box: [number, number, number, number]; polygons: Polygons }[] = [];
+  for (const row of await rows(
+    conn,
+    `SELECT ST_AsGeoJSON(geometry), ST_XMin(geometry), ST_YMin(geometry), ST_XMax(geometry), ST_YMax(geometry)
+     FROM '${file}'
+     WHERE ST_GeometryType(geometry) IN ('POLYGON', 'MULTIPOLYGON') AND NOT (${LAND_USE_KEPT})`,
+  )) {
+    const geometry = JSON.parse(text(row[0])) as { type: string; coordinates: unknown };
+    const polygons =
+      geometry.type === "Polygon"
+        ? [geometry.coordinates as number[][][]]
+        : (geometry.coordinates as Polygons);
+    shapes.push({ box: [numberOf(row[1]), numberOf(row[2]), numberOf(row[3]), numberOf(row[4])], polygons });
+  }
+  return (lon, lat) =>
+    shapes.some(
+      ({ box: [x0, y0, x1, y1], polygons }) =>
+        lon >= x0 && lon <= x1 && lat >= y0 && lat <= y1 && insidePolygons(polygons, lon, lat),
+    );
+}
+
 async function rows(conn: DuckDBConnection, sql: string): Promise<DuckDBValue[][]> {
   const reader = await conn.runAndReadAll(sql);
   return reader.getRows();
@@ -245,8 +275,11 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   await loadExtensions(conn, "spatial");
 
   const fog = await cityFog(conn, proj);
+  const covered = coverageTest(CITY.coverage);
+  const leftOut = await leftOutAreas(conn, raw("land_use.parquet"));
   /** Only things on the visible map are worth finding. */
   const onMap = (lon: number, lat: number): boolean => {
+    if (!covered(lon, lat)) return false;
     const [p, q] = proj.toGrid(lon, lat);
     return fogAt(fog, p, q) < FOG.start;
   };
@@ -258,6 +291,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     districtAt(lon, lat) || (CITY.search.districtOnly ? "" : CITY.title);
   /** May this spot be listed, and under which context line? Null when it may not. */
   const contextAt = (lon: number, lat: number): string | null => {
+    if (!covered(lon, lat)) return null;
     const district = districtAt(lon, lat);
     if (district) return district;
     return !CITY.search.districtOnly && onMap(lon, lat) ? CITY.title : null;
@@ -268,6 +302,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   const add = (place: Place): void => {
     const key = `${place.n.toLowerCase()}|${place.b ?? ""}`;
     if (!place.n) return;
+    if (leftOut(place.lon, place.lat)) return;
     const prior = seen.get(key);
     if (prior) {
       if (place.e && !prior.e) prior.e = place.e;
@@ -315,7 +350,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
       if (c.area > best.area) best = c;
       rings.push(simplify(polygon[0], 0.00012).flatMap(([lon, lat]) => [round5(lon), round5(lat)]));
     }
-    if (rings.length === 0) continue;
+    if (rings.length === 0 || !covered(best.lon, best.lat)) continue;
     hoods.push({
       name: hood.name,
       borough: hood.district,
@@ -404,6 +439,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
      WHERE names."primary" IS NOT NULL
        AND (height >= ${minHeight} OR (height IS NULL AND num_floors >= ${Math.round(minHeight / 4.6)})
             OR class IN (${namedClasses}))
+       AND ${BUILDING_KEPT}
      ORDER BY 4 DESC, id`,
   )) {
     const lon = numberOf(row[1]);
@@ -433,6 +469,7 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
     `SELECT names."primary", basic_category, ST_X(geometry), ST_Y(geometry), confidence, names.common['en']
      FROM '${raw("place.parquet")}'
      WHERE confidence >= 0.92 AND names."primary" IS NOT NULL AND basic_category IN (${categories})
+       AND ${PLACE_KEPT}
      ORDER BY confidence DESC`,
   )) {
     const lon = numberOf(row[2]);
@@ -579,7 +616,8 @@ export async function buildIndex(opts: { out?: string; log?: (m: string) => void
   }
   // boats the data has no route for
   for (const boat of CITY.boats ?? [])
-    ferries.push({ name: boat.name, path: boat.path.flatMap(([lon, lat]) => [round5(lon), round5(lat)]) });
+    if (boat.path.every(([lon, lat]) => covered(lon, lat)))
+      ferries.push({ name: boat.name, path: boat.path.flatMap(([lon, lat]) => [round5(lon), round5(lat)]) });
   conn.closeSync();
 
   places.sort(comparePlaces);
