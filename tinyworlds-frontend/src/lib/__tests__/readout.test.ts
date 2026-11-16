@@ -20,4 +20,13 @@ describe("viewReadout", () => {
     expect(viewReadout(0.0123, -0.0456, 0.5, PT, true)).toBe("50%");
     expect(viewReadout(0.0123, -0.0456, 3, PT, true)).toBe("3,0×");
   });
+
+  it("rounds the degrees to the world's digits", () => {
+    expect(viewReadout(22.54551, 114.06834, 1.5, EN, false, 3)).toBe(
+      "22.546° N  114.068° E  ·  1.5×",
+    );
+    expect(viewReadout(22.54551, 114.06834, 1.5, PT, false, 3)).toBe(
+      "22,546° N  114,068° L  ·  1,5×",
+    );
+  });
 });

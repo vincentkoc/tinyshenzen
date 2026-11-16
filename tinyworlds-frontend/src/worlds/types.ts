@@ -69,6 +69,8 @@ export interface World {
    * front page lists it apart from the real cities.
    */
   fictional?: boolean;
+  /** Decimals of the degrees in the corner readout. Defaults to 4. */
+  readoutDigits?: number;
   /**
    * Its data has sights (sights.json): buildings found in the search light up under the pointer,
    * with a line from Wikipedia. Without it the viewer never asks for the file.

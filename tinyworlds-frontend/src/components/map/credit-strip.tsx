@@ -32,6 +32,7 @@ export function CreditStrip({ engine, onAbout, className, style }: CreditStripPr
           engine.getView().scale,
           t.credit,
           WORLD.fictional,
+          WORLD.readoutDigits,
         );
     };
     write();
