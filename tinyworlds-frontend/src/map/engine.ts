@@ -870,6 +870,9 @@ export class MapEngine {
         aheadTx: ahead.aheadTx,
         aheadTy: ahead.aheadTy,
         deferNative: this.policy.deferNative,
+        // the screen first; then only the near half of the next row, unless a pan stretches it
+        ringAfterVisible: true,
+        ringReach: 0.5,
         aimX: v.x + (this.vx / Math.max(v.scale, 1e-6)) * 0.25,
         aimY: v.y + (this.vy / Math.max(v.scale, 1e-6)) * 0.25,
       },
@@ -1715,11 +1718,12 @@ function readConnection(): {
   effectiveType?: string;
   downlinkMbps?: number;
   rttMs?: number;
+  saveData?: boolean;
 } | null {
   if (typeof navigator === "undefined") return null;
   const conn = (
     navigator as Navigator & {
-      connection?: { effectiveType?: string; downlink?: number; rtt?: number };
+      connection?: { effectiveType?: string; downlink?: number; rtt?: number; saveData?: boolean };
     }
   ).connection;
   if (!conn) return null;
@@ -1727,5 +1731,6 @@ function readConnection(): {
     effectiveType: conn.effectiveType,
     downlinkMbps: conn.downlink,
     rttMs: conn.rtt,
+    saveData: conn.saveData === true,
   };
 }
