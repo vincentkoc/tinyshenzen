@@ -8,6 +8,8 @@ export interface ConnectionHint {
   effectiveType?: string;
   downlinkMbps?: number;
   rttMs?: number;
+  /** the user asked the browser to save data (Save-Data / Lite mode) */
+  saveData?: boolean;
 }
 
 export interface LoadPolicy {
@@ -19,6 +21,8 @@ export interface LoadPolicy {
   deferNative: boolean;
   /** a download nobody has asked for in this long is cancelled */
   staleMs: number;
+  /** Save-Data is on: never prefetch, whatever the measured link */
+  saveData?: boolean;
 }
 
 export const FAST_POLICY: LoadPolicy = {
@@ -59,6 +63,7 @@ export function isLocalHost(hostname: string | undefined): boolean {
 
 export function initialPolicy(hostname?: string, connection?: ConnectionHint | null): LoadPolicy {
   if (isLocalHost(hostname)) return { ...FAST_POLICY };
+  if (connection?.saveData) return { ...SLOW_POLICY, saveData: true };
   const type = connection?.effectiveType;
   if (type === "slow-2g" || type === "2g") return { ...CRAWL_POLICY };
   if (type === "3g") return { ...SLOW_POLICY };
@@ -122,8 +127,9 @@ export function policyFor(
     else base = CRAWL_POLICY;
   }
   const deferNative = moving && speed >= 700 && base.maxLoads <= 6;
-  const ring = deferNative ? 0 : base.ring;
-  return { ...base, deferNative, ring };
+  const saveData = !!initial.saveData;
+  const ring = deferNative || saveData ? 0 : base.ring;
+  return saveData ? { ...base, deferNative, ring, saveData } : { ...base, deferNative, ring };
 }
 
 /**

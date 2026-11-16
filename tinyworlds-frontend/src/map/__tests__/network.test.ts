@@ -73,3 +73,15 @@ describe("aheadTiles", () => {
     expect(aheadTiles(1, 2000, 0)).toEqual({ aheadTx: 2, aheadTy: 0 });
   });
 });
+
+describe("Save-Data", () => {
+  it("never prefetches, even once the link measures fast", () => {
+    const start = initialPolicy("tinysz.com", { effectiveType: "4g", saveData: true });
+    expect(start.ring).toBe(0);
+    const fast = addSample(emptyEstimate(), 500_000, 50);
+    expect(policyFor(start, fast, false, 0).ring).toBe(0);
+    expect(
+      policyFor(initialPolicy("tinysz.com", { effectiveType: "4g" }), fast, false, 0).ring,
+    ).toBe(1);
+  });
+});
