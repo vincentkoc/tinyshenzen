@@ -32,6 +32,15 @@ import {
   type LoadPolicy,
   type NetworkEstimate,
 } from "./network";
+import {
+  coverageMask,
+  DEFAULT_PAPER,
+  edgeFog,
+  FOG_SUBCELLS,
+  featherMask,
+  fogRadius,
+  paperRgb,
+} from "./edge-fog";
 import { levelForScale, pinLevels, planTiles, Pyramid, tileKey, type TileRequest } from "./tiles";
 
 /**
@@ -99,6 +108,8 @@ export interface EngineOptions {
   reducedMotion?: boolean;
   /** first view; defaults to manifest.start */
   start?: { lon: number; lat: number; scale?: number };
+  /** what the canvas shows where there is no map, and what its edges fade into (edge-fog.ts) */
+  paper?: string;
 }
 
 /** A sight's picture, loaded the first time it lights up (no bitmap: loading, or it failed). */
@@ -174,6 +185,10 @@ export class MapEngine {
     bottom: 1,
   };
   private minScale = 0.01;
+  private readonly paperRgb: [number, number, number];
+  private readonly paper: string;
+  /** the feathered outline of the tile boxes, redrawn when its blur radius changes */
+  private fogMask: { canvas: HTMLCanvasElement; radius: number; pad: number } | null = null;
   /** how many decoded tiles to keep (each is 1 MB at 512 px): the view, a ring, and parents */
   private maxTiles = 120;
   private reducedMotion: boolean;
@@ -273,6 +288,8 @@ export class MapEngine {
     this.tileUrl = options.tileUrl;
     this.fileUrl = options.fileUrl;
     this.reducedMotion = options.reducedMotion ?? false;
+    this.paperRgb = paperRgb(options.paper ?? DEFAULT_PAPER);
+    this.paper = `rgb(${this.paperRgb.join(", ")})`;
     this.projection = createProjection(options.manifest.geo);
     this.pyramid = new Pyramid(options.manifest);
     this.basePolicy = initialPolicy(
@@ -826,7 +843,9 @@ export class MapEngine {
     const { ctx, view: v, pyramid } = this;
     const s = v.scale * v.dpr; // device px per map px
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    // paper, not transparency: on a dark page the space around the map would be black
+    ctx.fillStyle = this.paper;
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     // chunky pixels once a map pixel is at least a screen pixel; smooth when shrinking
     ctx.imageSmoothingEnabled = v.scale < 1;
     ctx.imageSmoothingQuality = "medium";
@@ -910,8 +929,70 @@ export class MapEngine {
         }
       }
     }
+    this.drawEdgeFog();
     this.emitCoverage();
     return fading;
+  }
+
+  /** Zoomed out, fades the tile boxes' stepped outline into the paper (see edge-fog.ts). */
+  private drawEdgeFog(): void {
+    const { ctx, view: v, pyramid } = this;
+    const fog = edgeFog(v.scale, this.minScale);
+    if (fog.opacity <= 0) return;
+    const z = pyramid.minZ;
+    const grid = pyramid.grid(z);
+    if (!grid) return;
+    const cell = pyramid.span(z) / FOG_SUBCELLS; // map px per mask pixel
+    const radius = fogRadius(fog.reach, v.scale, cell);
+    let mask = this.fogMask;
+    if (!mask || mask.radius !== radius) {
+      mask = this.buildFogMask(grid.cols, grid.rows, z, radius);
+      if (!mask) return;
+      this.fogMask = mask;
+    }
+    const s = v.scale * v.dpr;
+    const left = pyramid.originX - mask.pad * cell;
+    const top = pyramid.originY - mask.pad * cell;
+    const dx = Math.round((left - v.left) * s);
+    const dy = Math.round((top - v.top) * s);
+    ctx.save();
+    ctx.globalAlpha = fog.opacity;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "medium";
+    ctx.drawImage(mask.canvas, dx, dy, mask.canvas.width * cell * s, mask.canvas.height * cell * s);
+    ctx.restore();
+  }
+
+  private buildFogMask(
+    cols: number,
+    rows: number,
+    z: number,
+    radius: number,
+  ): { canvas: HTMLCanvasElement; radius: number; pad: number } | null {
+    const pad = radius * 3 + 2;
+    const { data, width, height } = coverageMask(
+      cols,
+      rows,
+      (tx, ty) => this.pyramid.has(z, tx, ty),
+      FOG_SUBCELLS,
+      pad,
+    );
+    const alpha = featherMask(data, width, height, radius);
+    const canvas = this.fogMask?.canvas ?? document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const mctx = canvas.getContext("2d");
+    if (!mctx) return null;
+    const img = mctx.createImageData(width, height);
+    const [r, g, b] = this.paperRgb;
+    for (let i = 0, o = 0; i < alpha.length; i++, o += 4) {
+      img.data[o] = r;
+      img.data[o + 1] = g;
+      img.data[o + 2] = b;
+      img.data[o + 3] = Math.round(alpha[i] * 255);
+    }
+    mctx.putImageData(img, 0, 0);
+    return { canvas, radius, pad };
   }
 
   /** While a tile loads, show what is already here: its four children, or a coarser ancestor. */
