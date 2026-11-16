@@ -53,6 +53,27 @@ with `Cache-Control: public, max-age=60`. Everything else is immutable
 Pass `--force` to re-upload even when size and etag match. rclone is installed
 to `~/.local/bin` if it is not already on `PATH`.
 
+### Web tiles and the lossless originals
+
+The live map loads `tiles-web/`, the compressed copy built by
+`python3 lora/slice_frontend.py --out <world dir> --web-tiles` (see
+[docs/pipeline.md](../docs/pipeline.md)). The lossless `tiles-restyled/`
+originals stay on disk and in the bucket; `upload-data.sh` uploads both, and
+nothing is ever deleted from R2. For tinysz-core that is 34,755 objects: 7,666
+in each pyramid, 13,120 procedural `tiles/`, and the JSON and sights.
+
+`manifest.json` picks the pyramid:
+
+```json
+"restyle": {"dir": "tiles-web", "encoding": {"quality": 80, "method": 6, "sharp_yuv": true, "source": "tiles-restyled", ...}}
+```
+
+To switch the live map back to the originals, set `"dir"` to
+`"tiles-restyled"` (the `encoding.source` value), give `build` a new value
+(any new 9-hex-digit string, so `?v=` busts the tile caches), and run
+`./deploy/upload-data.sh tinysz-core`. Only the manifest changes; it is cached
+for 60 seconds. Switch forward again by rerunning `--web-tiles`.
+
 ## Deploy the site locally
 
 ```bash
@@ -100,7 +121,8 @@ required whenever the tiles or indexes change.
 
 1. Turn R2 on in the dashboard.
 2. `./deploy/setup-cloudflare.sh`
-3. `./deploy/upload-data.sh tinysz-core`
+3. `python3 lora/slice_frontend.py --out tinyworlds-frontend/public/data/tinysz-core --web-tiles`,
+   then `./deploy/upload-data.sh tinysz-core`
 4. Either `./deploy/deploy-site.sh`, or add the two repo secrets and push to
    `main` (or run the workflow by hand).
 
