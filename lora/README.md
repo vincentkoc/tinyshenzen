@@ -80,8 +80,8 @@ python3 lora/infer_multidiffusion.py \
   --lora lora/output/tinysz-pixelsg-edit.safetensors \
   --backend musubi \
   --out /workspace/tinysz-futian-lora \
-  --preview /workspace/tinyshenzen-futian-lora-preview.jpg \
-  --full /workspace/tinyshenzen-futian-lora.png
+  --preview /workspace/tinyshenzhen-futian-lora-preview.jpg \
+  --full /workspace/tinyshenzhen-futian-lora.png
 ```
 
 The stitch uses a smooth-step hem identical to `edgeWeight` in

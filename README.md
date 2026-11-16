@@ -8,7 +8,7 @@ Built from open data. Drawn in a fine miniature style inspired by Pixel Singapor
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Sponsor](https://img.shields.io/badge/sponsor-vincentkoc-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/vincentkoc)
-[![GitHub stars](https://img.shields.io/github/stars/vincentkoc/tinyshenzen?style=flat&logo=github)](https://github.com/vincentkoc/tinyshenzen/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/vincentkoc/tinyshenzhen?style=flat&logo=github)](https://github.com/vincentkoc/tinyshenzhen/stargazers)
 ![Node 22+](https://img.shields.io/badge/node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?logo=nextdotjs&logoColor=white)
@@ -20,7 +20,7 @@ Built from open data. Drawn in a fine miniature style inspired by Pixel Singapor
 
 <br>
 
-![Tiny Shenzhen in the viewer: Houhai, China Resources Headquarters, the Shenzhen Bay Sports Center and Shenzhen Bay Park](docs/images/tinyshenzen-core.webp)
+![Tiny Shenzhen in the viewer: Houhai, China Resources Headquarters, the Shenzhen Bay Sports Center and Shenzhen Bay Park](docs/images/tinyshenzhen-core.webp)
 
 <br>
 
