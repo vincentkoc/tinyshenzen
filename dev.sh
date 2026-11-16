@@ -4,7 +4,7 @@
 #   ./dev.sh tinysz-core   the restyled Nanshan–Futian–Luohu strip
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SESSION="tinyshenzen"
+SESSION="tinyshenzhen"
 WORLD="${1:-tinysz}"
 
 if tmux has-session -t "$SESSION" 2>/dev/null; then
