@@ -1,0 +1,4 @@
+# Cloudflare Pages response headers for the static export.
+# Next.js hashes everything under /_next/static, so it never changes in place.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
