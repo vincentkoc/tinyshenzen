@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUTHOR_URL,
   BUILT_CITIES,
   CITIES_PATH,
   CONTACT_EMAIL,
   CONTACT_URL,
   GITHUB_URL,
+  SPONSOR_URL,
   HERO,
   HERO_FILMS,
   heroSlides,
@@ -28,6 +30,11 @@ describe("site", () => {
 
   it("points at the project's source", () => {
     expect(GITHUB_URL).toBe("https://github.com/vincentkoc/tinyshenzhen");
+  });
+
+  it("points at the author's page and GitHub Sponsors", () => {
+    expect(AUTHOR_URL).toBe("https://github.com/vincentkoc");
+    expect(SPONSOR_URL).toBe("https://github.com/sponsors/vincentkoc");
   });
 
   it("finds each world, and its share card, in the world's own folder", () => {

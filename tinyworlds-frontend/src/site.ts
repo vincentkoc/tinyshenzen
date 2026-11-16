@@ -33,6 +33,12 @@ export const BUILT_CITIES: string[] = Object.values(WORLDS).flatMap((world) => [
 /** The project's source. */
 export const GITHUB_URL = "https://github.com/vincentkoc/tinyshenzhen";
 
+/** The author's page, used in the map credits. */
+export const AUTHOR_URL = "https://github.com/vincentkoc";
+
+/** Where to sponsor the project when no Stripe checkout or API is configured. */
+export const SPONSOR_URL = "https://github.com/sponsors/vincentkoc";
+
 /** Where to write about the project: questions, ideas, a city someone wants to see. */
 export const CONTACT_EMAIL = "github.com/vincentkoc/tinyshenzhen";
 export const CONTACT_URL = `${GITHUB_URL}/issues`;
