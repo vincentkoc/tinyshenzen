@@ -1,7 +1,8 @@
 "use client";
 
-import { RotateCw } from "lucide-react";
+import { Heart, RotateCw } from "lucide-react";
 import { useI18n } from "@/hooks/use-i18n";
+import { AUTHOR_URL } from "@/site";
 import { Wordmark } from "./wordmark";
 
 const STOREYS = [14, 26, 18, 38, 22, 30, 12];
@@ -44,6 +45,15 @@ export function Splash({ failed, onRetry }: SplashProps) {
           {copy.splash}
         </p>
       )}
+      <a
+        href={AUTHOR_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="absolute inset-x-0 bottom-(--edge-b) mx-auto flex w-fit items-center gap-1.5 text-sm font-medium opacity-60 outline-none hover:opacity-90 focus-visible:text-taxi"
+      >
+        <Heart aria-hidden className="size-3.5 fill-taxi text-taxi" strokeWidth={2.25} />
+        {t.credit.madeBy}
+      </a>
     </div>
   );
 }
