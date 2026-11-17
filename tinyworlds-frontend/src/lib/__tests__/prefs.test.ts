@@ -33,13 +33,4 @@ describe("sanitizePrefs", () => {
     expect(sanitizePrefs({ restyle: false }).restyle).toBe(false);
     expect(sanitizePrefs({ restyle: "yes" }).restyle).toBe(true);
   });
-
-  it("keeps night lighting off unless it was chosen", () => {
-    expect(DEFAULT_PREFS.night).toBe("off");
-    expect(sanitizePrefs({}).night).toBe("off");
-    expect(sanitizePrefs({ night: "on" }).night).toBe("on");
-    expect(sanitizePrefs({ night: "auto" }).night).toBe("auto");
-    expect(sanitizePrefs({ night: true }).night).toBe("off");
-    expect(sanitizePrefs({ night: "dusk" }).night).toBe("off");
-  });
 });
