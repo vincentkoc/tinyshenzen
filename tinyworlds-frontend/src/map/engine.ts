@@ -95,6 +95,19 @@ export interface EngineEvents {
   sight: (shown: { id: string; pinned: boolean } | null) => void;
   /** how much of the view is sharp, for a quiet loading mark */
   coverage: (info: { ready: number; total: number; loading: number }) => void;
+  /** the tiles canvas was just redrawn (tiles, pictures and scene), for a layer that reads it */
+  draw: (view: Readonly<ViewState>, timeMs: number) => void;
+}
+
+/** Where the map has tiles: the finest level's grid, for a layer that stays inside it. */
+export interface CoverageGrid {
+  cols: number;
+  rows: number;
+  /** map px of the grid's top-left corner, and the side of one cell */
+  originX: number;
+  originY: number;
+  span: number;
+  has: (tx: number, ty: number) => boolean;
 }
 
 export interface EngineOptions {
@@ -278,6 +291,7 @@ export class MapEngine {
     hood: new Set(),
     sight: new Set(),
     coverage: new Set(),
+    draw: new Set(),
   };
   private readonly resizeObserver: ResizeObserver;
 
@@ -392,6 +406,25 @@ export class MapEngine {
   getFitScale(): number {
     const b = this.manifest.bounds;
     return Math.min(this.view.width / (b.maxX - b.minX), this.view.height / (b.maxY - b.minY));
+  }
+
+  /** The colour drawn where there is no map, as [r, g, b] 0–255. */
+  getPaper(): [number, number, number] {
+    return [...this.paperRgb];
+  }
+
+  /** The finest level's grid of tiles (null when the manifest has none). */
+  getCoverage(): CoverageGrid | null {
+    const z = this.pyramid.minZ;
+    const grid = this.pyramid.grid(z);
+    if (!grid) return null;
+    return {
+      ...grid,
+      originX: this.pyramid.originX,
+      originY: this.pyramid.originY,
+      span: this.pyramid.span(z),
+      has: (tx, ty) => this.pyramid.has(z, tx, ty),
+    };
   }
 
   getScaleLimits(): { min: number; max: number } {
@@ -755,6 +788,7 @@ export class MapEngine {
       if (this.drawSightPicture(now)) fading = true;
       this.drawScene(now);
       this.drawMarks(now);
+      for (const listener of this.listeners.draw) listener(this.view, now);
       this.pump(now);
       this.evict();
     }
