@@ -159,13 +159,15 @@ export function MapApp() {
           if (info.ready > 0) askPlaces();
         });
         setTimeout(askPlaces, 1200);
-        loadHoods(manifest.indexes, abort.signal)
-          .then((hoods) => {
-            if (abort.signal.aborted) return;
-            live.setHoods(hoods);
-            setHasHoods(hoods.length > 0);
-          })
-          .catch(() => {});
+        if (WORLD.outlines !== false) {
+          loadHoods(manifest.indexes, abort.signal)
+            .then((hoods) => {
+              if (abort.signal.aborted) return;
+              live.setHoods(hoods);
+              setHasHoods(hoods.length > 0);
+            })
+            .catch(() => {});
+        }
         loadLife(manifest.indexes, abort.signal)
           .then((life) => {
             if (abort.signal.aborted) return;

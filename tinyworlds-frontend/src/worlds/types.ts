@@ -78,6 +78,11 @@ export interface World {
   /** Decimals of the degrees in the corner readout. Defaults to 4. */
   readoutDigits?: number;
   /**
+   * Whether the outlines in hoods.json can be drawn (the setting and the B key). Defaults to
+   * true; false: the file is never asked for, and the setting is not offered.
+   */
+  outlines?: boolean;
+  /**
    * Its data has sights (sights.json): buildings found in the search light up under the pointer,
    * with a line from Wikipedia. Without it the viewer never asks for the file.
    */
