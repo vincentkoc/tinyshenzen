@@ -1,5 +1,6 @@
 import { activeStrings } from "@/i18n";
 import { WORLD } from "@/worlds";
+import { clampCentre, minScaleFor } from "./zoom-limit";
 import { buildHoodShapes, hoodAt, type HoodShape } from "./hoods";
 import type { Hood, Manifest } from "./manifest";
 import { createProjection, type GeoPoint, type MapPoint, type Projection } from "./projection";
@@ -123,6 +124,8 @@ export interface EngineOptions {
   start?: { lon: number; lat: number; scale?: number };
   /** what the canvas shows where there is no map, and what its edges fade into (edge-fog.ts) */
   paper?: string;
+  /** how far out the view may go (see zoom-limit.ts); defaults to DEFAULT_MIN_ZOOM */
+  minZoom?: number;
 }
 
 /** A sight's picture, loaded the first time it lights up (no bitmap: loading, or it failed). */
@@ -184,6 +187,7 @@ export class MapEngine {
   private readonly pyramid: Pyramid;
   private tileUrl: EngineOptions["tileUrl"];
   private readonly fileUrl: EngineOptions["fileUrl"];
+  private readonly minZoom: number | undefined;
 
   private view: ViewState = {
     x: 0,
@@ -301,6 +305,7 @@ export class MapEngine {
     this.manifest = options.manifest;
     this.tileUrl = options.tileUrl;
     this.fileUrl = options.fileUrl;
+    this.minZoom = options.minZoom;
     this.reducedMotion = options.reducedMotion ?? false;
     this.paperRgb = paperRgb(options.paper ?? DEFAULT_PAPER);
     this.paper = `rgb(${this.paperRgb.join(", ")})`;
@@ -657,8 +662,13 @@ export class MapEngine {
       if (c.width !== w) c.width = w;
       if (c.height !== h) c.height = h;
     }
-    const fit = this.getFitScale();
-    this.minScale = Math.min(fit * 0.6, this.manifest.maxScale, 1);
+    this.minScale = minScaleFor(
+      width,
+      height,
+      this.manifest.bounds,
+      this.manifest.maxScale,
+      this.minZoom,
+    );
     this.refreshBudget();
   }
 
@@ -731,10 +741,11 @@ export class MapEngine {
     const v = this.view;
     const b = this.manifest.bounds;
     v.scale = clamp(v.scale, this.minScale, this.manifest.maxScale);
-    v.x = clamp(v.x, b.minX, b.maxX);
-    v.y = clamp(v.y, b.minY, b.maxY);
     const hw = v.width / 2 / v.scale;
     const hh = v.height / 2 / v.scale;
+    // the view stays on the map: no panning out past its edges into the paper
+    v.x = clampCentre(v.x, hw, b.minX, b.maxX);
+    v.y = clampCentre(v.y, hh, b.minY, b.maxY);
     v.left = v.x - hw;
     v.right = v.x + hw;
     v.top = v.y - hh;

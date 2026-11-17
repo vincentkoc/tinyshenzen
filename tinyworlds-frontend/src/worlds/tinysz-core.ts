@@ -104,6 +104,8 @@ export const tinyszCore: World = {
   credit: "© OpenStreetMap · Overture Maps",
   readoutDigits: 3,
   outlines: false,
+  // the city is a long diagonal strip: stop where it still fills the screen
+  minZoom: 3,
   cover: () => import("./tinysz-core.cover").then((m) => m.COVER),
   // Shenzhen Bay teal
   accent: { color: "#1aa6c1", ink: "#042328" },

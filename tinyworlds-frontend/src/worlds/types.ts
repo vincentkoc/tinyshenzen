@@ -78,6 +78,11 @@ export interface World {
   /** Decimals of the degrees in the corner readout. Defaults to 4. */
   readoutDigits?: number;
   /**
+   * How far out the view may go, as a share of the scale at which the map fills the screen
+   * (1: edge to edge, above 1: closer in). Defaults to DEFAULT_MIN_ZOOM (map/zoom-limit.ts).
+   */
+  minZoom?: number;
+  /**
    * Whether the outlines in hoods.json can be drawn (the setting and the B key). Defaults to
    * true; false: the file is never asked for, and the setting is not offered.
    */
