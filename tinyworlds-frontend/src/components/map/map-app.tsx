@@ -70,7 +70,6 @@ const PAN_STEP = 160; // CSS px per arrow key press
 export function MapApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const marksRef = useRef<HTMLCanvasElement>(null);
-  const nightRef = useRef<HTMLCanvasElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [attempt, setAttempt] = useState(0);
@@ -262,13 +261,7 @@ export function MapApp() {
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
-  const night = useNight(
-    engine,
-    NIGHT_ENABLED ? prefs.night : "off",
-    canvasRef,
-    nightRef,
-    reducedMotion,
-  );
+  const nightShowing = useNight(engine, NIGHT_ENABLED ? prefs.night : "off", reducedMotion);
 
   // the view lives in the URL, so any spot can be shared
   useEffect(() => {
@@ -421,16 +414,10 @@ export function MapApp() {
 
   return (
     <div
-      className={cn(
-        "map-root",
-        tiltOn && "tilt-on",
-        night.showing && "night-on",
-        night.flat && "night-flat",
-      )}
+      className={cn("map-root", tiltOn && "tilt-on", nightShowing && "night-on")}
       style={rootStyle}
     >
       <canvas ref={canvasRef} className="map-tiles" tabIndex={0} aria-label={copy.mapLabel} />
-      <canvas ref={nightRef} aria-hidden className="map-night" />
       <div aria-hidden className="dusk-wash" />
       <div aria-hidden className="tilt-band" data-edge="top" data-depth="near" />
       <div aria-hidden className="tilt-band" data-edge="top" data-depth="far" />

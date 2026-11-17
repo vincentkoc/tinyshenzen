@@ -96,8 +96,23 @@ export interface EngineEvents {
   sight: (shown: { id: string; pinned: boolean } | null) => void;
   /** how much of the view is sharp, for a quiet loading mark */
   coverage: (info: { ready: number; total: number; loading: number }) => void;
-  /** the tiles canvas was just redrawn (tiles, pictures and scene), for a layer that reads it */
-  draw: (view: Readonly<ViewState>, timeMs: number) => void;
+}
+
+/**
+ * Another look for the tiles (night): each tile picture is turned into its own version once, when
+ * it is first needed, and the engine draws that in its place, mixed in by `setLookMix`.
+ */
+export interface TileLook {
+  /** the picture's other version (null: none); `place` is where it lies, in map px */
+  make(
+    bitmap: ImageBitmap,
+    place: { left: number; top: number; span: number } | null,
+    /** the 3×3 block of same-level pictures around it (row by row, itself in the middle), so
+     * what reads across its edges agrees with its neighbours; null where one is missing */
+    around: (ImageBitmap | null)[] | null,
+  ): Promise<ImageBitmap | null>;
+  /** what the paper turns into, [r, g, b] 0–255 */
+  paper: [number, number, number];
 }
 
 /** Where the map has tiles: the finest level's grid, for a layer that stays inside it. */
@@ -131,6 +146,8 @@ export interface EngineOptions {
 /** A sight's picture, loaded the first time it lights up (no bitmap: loading, or it failed). */
 interface SightPicture {
   bitmap: ImageBitmap | null;
+  alt: ImageBitmap | null;
+  altGen: number;
   readyAt: number;
   usedAt: number;
 }
@@ -143,6 +160,13 @@ interface Tile {
   state: "loading" | "ready" | "error";
   bitmap: ImageBitmap | null;
   readyAt: number;
+  /** the look's version of the picture, once made, and when it arrived */
+  alt: ImageBitmap | null;
+  altAt: number;
+  /** the look's generation it was made for (or is being made for); 0: none */
+  altGen: number;
+  /** made while a neighbour it reads across its edges was still loading: made again later */
+  altPartial: boolean;
   usedFrame: number;
   wantedAt: number;
   abort: AbortController | null;
@@ -151,6 +175,18 @@ interface Tile {
 }
 
 type Wanted = TileRequest;
+
+/** Frees a sight's picture and its look's version (a version still being made is let go). */
+function dropPicture(picture: SightPicture): void {
+  picture.bitmap?.close();
+  picture.alt?.close();
+  picture.bitmap = null;
+  picture.alt = null;
+}
+type FogMask = { canvas: HTMLCanvasElement; radius: number; pad: number };
+
+/** How many tile pictures the look works on at once. */
+const ALT_JOBS = 3;
 
 const FADE_MS = 180;
 const SETTLE_MS = 220;
@@ -205,7 +241,17 @@ export class MapEngine {
   private readonly paperRgb: [number, number, number];
   private readonly paper: string;
   /** the feathered outline of the tile boxes, redrawn when its blur radius changes */
-  private fogMask: { canvas: HTMLCanvasElement; radius: number; pad: number } | null = null;
+  private fogMask: FogMask | null = null;
+  /** the same in the look's paper */
+  private fogMaskAlt: FogMask | null = null;
+  /** the other look (night), how far it is mixed in, and its generation (bumped per look) */
+  private look: TileLook | null = null;
+  private lookMix = 0;
+  private lookGen = 0;
+  private lookPaper = "";
+  private altBusy = 0;
+  private lookReady = 0;
+  private lookWarm = false;
   /** how many decoded tiles to keep (each is 1 MB at 512 px): the view, a ring, and parents */
   private maxTiles = 120;
   private reducedMotion: boolean;
@@ -295,7 +341,6 @@ export class MapEngine {
     hood: new Set(),
     sight: new Set(),
     coverage: new Set(),
-    draw: new Set(),
   };
   private readonly resizeObserver: ResizeObserver;
 
@@ -366,7 +411,7 @@ export class MapEngine {
     cancelAnimationFrame(this.raf);
     if (this.settleTimer) clearTimeout(this.settleTimer);
     if (this.holdTimer) clearTimeout(this.holdTimer);
-    for (const picture of this.pictures.values()) picture.bitmap?.close();
+    for (const picture of this.pictures.values()) dropPicture(picture);
     this.pictures.clear();
     this.resizeObserver.disconnect();
     window.removeEventListener("resize", this.onWindowResize);
@@ -382,6 +427,7 @@ export class MapEngine {
     for (const tile of this.tiles.values()) {
       tile.abort?.abort();
       tile.bitmap?.close();
+      tile.alt?.close();
     }
     this.tiles.clear();
     for (const set of Object.values(this.listeners)) set.clear();
@@ -570,7 +616,7 @@ export class MapEngine {
   setSights(sights: Sight[]): void {
     this.sights = buildSightShapes(sights);
     this.sightIndex = new Map(this.sights.map((s, i) => [s.id, i]));
-    for (const picture of this.pictures.values()) picture.bitmap?.close();
+    for (const picture of this.pictures.values()) dropPicture(picture);
     this.pictures.clear();
     this.setSightState({ hovered: null, pinned: null, leftAt: null });
     this.invalidate();
@@ -612,12 +658,57 @@ export class MapEngine {
     this.invalidate();
   }
 
+  /**
+   * Another look for the tiles (null: none), and how far it is mixed in (0 the tiles as they
+   * are, 1 only the look). Pictures are made as tiles are drawn, a few at a time; until a tile's
+   * is ready, a coarser one stands in.
+   */
+  setLook(look: TileLook | null): void {
+    if (this.look === look) return;
+    this.look = look;
+    this.lookGen++;
+    this.altBusy = 0;
+    this.fogMaskAlt = null;
+    this.lookPaper = look ? `rgb(${look.paper.join(", ")})` : "";
+    for (const tile of this.tiles.values()) {
+      tile.alt?.close();
+      tile.alt = null;
+      tile.altGen = 0;
+    }
+    for (const picture of this.pictures.values()) {
+      picture.alt?.close();
+      picture.alt = null;
+      picture.altGen = 0;
+    }
+    if (!look) this.lookMix = 0;
+    this.invalidate();
+  }
+
+  /** How much of the view's loaded tiles have the look's version, 0–1, as of the last frame. */
+  getLookReady(): number {
+    return this.look ? this.lookReady : 0;
+  }
+
+  /** While the look is on its way in: its pictures are made ahead, before it is mixed in. */
+  setLookWarm(on: boolean): void {
+    this.lookWarm = on;
+    if (on) this.invalidate();
+  }
+
+  setLookMix(mix: number): void {
+    const m = this.look ? clamp(mix, 0, 1) : 0;
+    if (m === this.lookMix) return;
+    this.lookMix = m;
+    this.invalidate();
+  }
+
   /** Swap the tile pyramid (procedural vs restyle) and redraw from a cold cache. */
   setTileUrl(tileUrl: EngineOptions["tileUrl"]): void {
     this.tileUrl = tileUrl;
     for (const tile of this.tiles.values()) {
       tile.abort?.abort();
       tile.bitmap?.close();
+      tile.alt?.close();
     }
     this.tiles.clear();
     this.inflight = 0;
@@ -799,7 +890,6 @@ export class MapEngine {
       if (this.drawSightPicture(now)) fading = true;
       this.drawScene(now);
       this.drawMarks(now);
-      for (const listener of this.listeners.draw) listener(this.view, now);
       this.pump(now);
       this.evict();
     }
@@ -889,8 +979,15 @@ export class MapEngine {
     const s = v.scale * v.dpr; // device px per map px
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     // paper, not transparency: on a dark page the space around the map would be black
-    ctx.fillStyle = this.paper;
+    const mix = this.lookMix;
+    ctx.fillStyle = mix >= 1 ? this.lookPaper : this.paper;
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    if (mix > 0 && mix < 1) {
+      ctx.globalAlpha = mix;
+      ctx.fillStyle = this.lookPaper;
+      ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      ctx.globalAlpha = 1;
+    }
     // chunky pixels once a map pixel is at least a screen pixel; smooth when shrinking
     ctx.imageSmoothingEnabled = v.scale < 1;
     ctx.imageSmoothingQuality = "medium";
@@ -942,6 +1039,8 @@ export class MapEngine {
     const devY = (my: number) => Math.round((my - v.top) * s);
     const span = pyramid.span(z);
     let fading = false;
+    let looked = 0;
+    let lookedReady = 0;
 
     for (let ty = range.ty0; ty <= range.ty1; ty++) {
       for (let tx = range.tx0; tx <= range.tx1; tx++) {
@@ -966,20 +1065,126 @@ export class MapEngine {
           }
         }
 
-        if (alpha < 1) {
-          this.drawStandIn(z, tx, ty, dx, dy, dw, dh);
-          if (alpha > 0) fading = true;
+        if (mix < 1) {
+          if (alpha < 1) {
+            this.drawStandIn(z, tx, ty, dx, dy, dw, dh, false);
+            if (alpha > 0) fading = true;
+          }
+          if (alpha > 0 && tile?.bitmap) {
+            ctx.globalAlpha = alpha;
+            ctx.drawImage(tile.bitmap, dx, dy, dw, dh);
+            ctx.globalAlpha = 1;
+          }
         }
-        if (alpha > 0 && tile?.bitmap) {
-          ctx.globalAlpha = alpha;
-          ctx.drawImage(tile.bitmap, dx, dy, dw, dh);
-          ctx.globalAlpha = 1;
+        if (this.look && tile?.state === "ready") {
+          looked++;
+          if (tile.alt) lookedReady++;
+          else if (mix <= 0 && this.lookWarm) this.wantAlt(tile);
         }
+        if (mix > 0 && this.drawAlt(tile, z, tx, ty, dx, dy, dw, dh, now, mix)) fading = true;
       }
     }
+    this.lookReady = looked > 0 ? lookedReady / looked : 0;
     this.drawEdgeFog();
     this.emitCoverage();
     return fading;
+  }
+
+  /**
+   * The look's version of a tile over (or, fully mixed, instead of) the tile: faded in when it
+   * arrives, over the look's version of a coarser tile while it is being made. Returns whether
+   * it is still fading in.
+   */
+  private drawAlt(
+    tile: Tile | undefined,
+    z: number,
+    tx: number,
+    ty: number,
+    dx: number,
+    dy: number,
+    dw: number,
+    dh: number,
+    now: number,
+    mix: number,
+  ): boolean {
+    const ctx = this.ctx;
+    let a = 0;
+    if (tile?.state === "ready" && tile.bitmap) {
+      this.wantAlt(tile);
+      if (tile.altPartial && tile.alt && this.altBusy < ALT_JOBS && !this.neighbourLoading(tile)) {
+        tile.altGen = 0; // its neighbours are in now: made again, with them
+        this.wantAlt(tile);
+      }
+      if (tile.alt) a = this.reducedMotion ? 1 : clamp((now - tile.altAt) / FADE_MS, 0, 1);
+    }
+    if (a < 1) {
+      ctx.globalAlpha = mix;
+      this.drawStandIn(z, tx, ty, dx, dy, dw, dh, true);
+    }
+    if (a > 0 && tile?.alt) {
+      ctx.globalAlpha = mix * a;
+      ctx.drawImage(tile.alt, dx, dy, dw, dh);
+    }
+    ctx.globalAlpha = 1;
+    return a > 0 && a < 1;
+  }
+
+  /** Asks the look for a tile's version, unless it has it, is making it, or is busy. */
+  private wantAlt(tile: Tile): void {
+    const look = this.look;
+    if (!look || !tile.bitmap || tile.altGen === this.lookGen || this.altBusy >= ALT_JOBS) return;
+    const gen = this.lookGen;
+    tile.altGen = gen;
+    this.altBusy++;
+    const span = this.pyramid.span(tile.z);
+    const place = {
+      left: this.pyramid.originX + tile.tx * span,
+      top: this.pyramid.originY + tile.ty * span,
+      span,
+    };
+    const partial = this.neighbourLoading(tile);
+    const done = (alt: ImageBitmap | null) => {
+      if (gen !== this.lookGen) {
+        alt?.close();
+        return;
+      }
+      this.altBusy--;
+      if (this.destroyed || this.tiles.get(tile.key) !== tile || !alt) {
+        alt?.close();
+        if (!alt && this.tiles.get(tile.key) === tile) tile.altGen = 0;
+        this.invalidate();
+        return;
+      }
+      // made again: swapped in place, without fading in a second time
+      if (!tile.alt) tile.altAt = performance.now();
+      tile.alt?.close();
+      tile.alt = alt;
+      tile.altPartial = partial;
+      this.invalidate();
+    };
+    const around: (ImageBitmap | null)[] = [];
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const n = this.tiles.get(tileKey(tile.z, tile.tx + dx, tile.ty + dy));
+        around.push(n?.state === "ready" && n.bitmap ? n.bitmap : null);
+      }
+    }
+    look.make(tile.bitmap, place, around).then(done, () => done(null));
+  }
+
+  /** Whether a neighbour of the tile (one the map has) is not loaded yet. */
+  private neighbourLoading(tile: Tile): boolean {
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const nx = tile.tx + dx;
+        const ny = tile.ty + dy;
+        if (!this.pyramid.has(tile.z, nx, ny)) continue;
+        const n = this.tiles.get(tileKey(tile.z, nx, ny));
+        if (n?.state !== "ready" || !n.bitmap) return true;
+      }
+    }
+    return false;
   }
 
   /** Zoomed out, fades the tile boxes' stepped outline into the paper (see edge-fog.ts). */
@@ -992,28 +1197,42 @@ export class MapEngine {
     if (!grid) return;
     const cell = pyramid.span(z) / FOG_SUBCELLS; // map px per mask pixel
     const radius = fogRadius(fog.reach, v.scale, cell);
+    const mix = this.lookMix;
     let mask = this.fogMask;
-    if (!mask || mask.radius !== radius) {
-      mask = this.buildFogMask(grid.cols, grid.rows, z, radius);
+    if (mix < 1 && (!mask || mask.radius !== radius)) {
+      mask = this.buildFogMask(grid.cols, grid.rows, z, radius, this.paperRgb, this.fogMask);
       if (!mask) return;
       this.fogMask = mask;
     }
+    let alt = this.fogMaskAlt;
+    if (mix > 0 && this.look && (!alt || alt.radius !== radius)) {
+      alt = this.buildFogMask(grid.cols, grid.rows, z, radius, this.look.paper, this.fogMaskAlt);
+      if (!alt) return;
+      this.fogMaskAlt = alt;
+    }
+    const shown = mix >= 1 ? alt : mask;
+    if (!shown) return;
     const s = v.scale * v.dpr;
-    const left = pyramid.originX - mask.pad * cell;
-    const top = pyramid.originY - mask.pad * cell;
+    const left = pyramid.originX - shown.pad * cell;
+    const top = pyramid.originY - shown.pad * cell;
     const dx = Math.round((left - v.left) * s);
     const dy = Math.round((top - v.top) * s);
     ctx.save();
     ctx.globalAlpha = fog.opacity;
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "medium";
-    const dw = Math.round(mask.canvas.width * cell * s);
-    const dh = Math.round(mask.canvas.height * cell * s);
-    ctx.drawImage(mask.canvas, dx, dy, dw, dh);
+    const dw = Math.round(shown.canvas.width * cell * s);
+    const dh = Math.round(shown.canvas.height * cell * s);
+    ctx.drawImage(shown.canvas, dx, dy, dw, dh);
+    if (mix > 0 && mix < 1 && alt) {
+      ctx.globalAlpha = fog.opacity * mix;
+      ctx.drawImage(alt.canvas, dx, dy, dw, dh);
+      ctx.globalAlpha = fog.opacity;
+    }
     // coarse tiles reach past the finest grid: paper over whatever they hold out there
     const W = this.canvas.width;
     const H = this.canvas.height;
-    ctx.fillStyle = this.paper;
+    ctx.fillStyle = mix >= 0.5 ? this.lookPaper : this.paper;
     if (dy > 0) ctx.fillRect(0, 0, W, dy);
     if (dy + dh < H) ctx.fillRect(0, dy + dh, W, H - dy - dh);
     if (dx > 0) ctx.fillRect(0, dy, dx, dh);
@@ -1026,7 +1245,9 @@ export class MapEngine {
     rows: number,
     z: number,
     radius: number,
-  ): { canvas: HTMLCanvasElement; radius: number; pad: number } | null {
+    rgb: readonly [number, number, number],
+    old: FogMask | null,
+  ): FogMask | null {
     const pad = radius * 3 + 2;
     const { data, width, height } = coverageMask(
       cols,
@@ -1036,13 +1257,13 @@ export class MapEngine {
       pad,
     );
     const alpha = featherMask(data, width, height, radius);
-    const canvas = this.fogMask?.canvas ?? document.createElement("canvas");
+    const canvas = old?.canvas ?? document.createElement("canvas");
     canvas.width = width;
     canvas.height = height;
     const mctx = canvas.getContext("2d");
     if (!mctx) return null;
     const img = mctx.createImageData(width, height);
-    const [r, g, b] = this.paperRgb;
+    const [r, g, b] = rgb;
     for (let i = 0, o = 0; i < alpha.length; i++, o += 4) {
       img.data[o] = r;
       img.data[o + 1] = g;
@@ -1062,8 +1283,16 @@ export class MapEngine {
     dy: number,
     dw: number,
     dh: number,
+    useAlt: boolean,
   ): void {
     const { ctx, pyramid } = this;
+    // the look's version, or the plain picture
+    const pic = (t: Tile | undefined) => {
+      if (t?.state !== "ready" || !t.bitmap) return null;
+      if (!useAlt) return t.bitmap;
+      if (!t.alt) this.wantAlt(t);
+      return t.alt;
+    };
     if (z > 0 && pyramid.hasLevel(z - 1)) {
       const kids: [ImageBitmap, number, number][] = [];
       let complete = true;
@@ -1073,12 +1302,13 @@ export class MapEngine {
           const cy = ty * 2 + j;
           if (!pyramid.has(z - 1, cx, cy)) continue;
           const kid = this.tiles.get(tileKey(z - 1, cx, cy));
-          if (kid?.state !== "ready" || !kid.bitmap) {
+          const kidPic = kid && kid.state === "ready" ? (useAlt ? kid.alt : kid.bitmap) : null;
+          if (!kid || !kidPic) {
             complete = false;
             break;
           }
           kid.usedFrame = this.frameNo;
-          kids.push([kid.bitmap, i, j]);
+          kids.push([kidPic, i, j]);
         }
       }
       if (complete && kids.length > 0) {
@@ -1098,12 +1328,13 @@ export class MapEngine {
       const ax = tx >> dz;
       const ay = ty >> dz;
       const ancestor = this.tiles.get(tileKey(z + dz, ax, ay));
-      if (ancestor?.state !== "ready" || !ancestor.bitmap) continue;
+      const picture = pic(ancestor);
+      if (!ancestor || !picture) continue;
       ancestor.usedFrame = this.frameNo;
       const size = pyramid.tileSize / 2 ** dz;
       const sx = (tx - (ax << dz)) * size;
       const sy = (ty - (ay << dz)) * size;
-      ctx.drawImage(ancestor.bitmap, sx, sy, size, size, dx, dy, dw, dh);
+      ctx.drawImage(picture, sx, sy, size, size, dx, dy, dw, dh);
       return;
     }
   }
@@ -1157,6 +1388,10 @@ export class MapEngine {
       state: "loading",
       bitmap: null,
       readyAt: 0,
+      alt: null,
+      altAt: 0,
+      altGen: 0,
+      altPartial: false,
       usedFrame: this.frameNo,
       wantedAt: now,
       abort,
@@ -1218,6 +1453,7 @@ export class MapEngine {
     for (const tile of idle) {
       if (this.tiles.size <= this.maxTiles) break;
       tile.bitmap?.close();
+      tile.alt?.close();
       this.tiles.delete(tile.key);
     }
   }
@@ -1249,10 +1485,38 @@ export class MapEngine {
     const alpha = this.reducedMotion ? 1 : clamp((now - from) / SPOT_FADE_MS, 0, 1);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = v.scale < 1;
-    ctx.globalAlpha = alpha;
-    ctx.drawImage(picture.bitmap, dx, dy, dw, dh);
+    const mix = this.lookMix;
+    if (mix > 0) this.wantPictureAlt(picture, sprite);
+    // fully mixed and its version not made yet: leave the tiles' version showing
+    if (mix < 1 || picture.alt) {
+      ctx.globalAlpha = alpha * (picture.alt ? 1 : 1 - mix);
+      ctx.drawImage(picture.alt && mix >= 1 ? picture.alt : picture.bitmap, dx, dy, dw, dh);
+      if (picture.alt && mix < 1) {
+        ctx.globalAlpha = alpha * mix;
+        ctx.drawImage(picture.alt, dx, dy, dw, dh);
+      }
+    }
     ctx.globalAlpha = 1;
     return alpha < 1;
+  }
+
+  private wantPictureAlt(picture: SightPicture, sprite: { x: number; y: number; w: number }): void {
+    const look = this.look;
+    if (!look || !picture.bitmap || picture.altGen === this.lookGen) return;
+    const gen = this.lookGen;
+    picture.altGen = gen;
+    look
+      .make(picture.bitmap, { left: sprite.x, top: sprite.y, span: sprite.w }, null)
+      .catch(() => null)
+      .then((alt) => {
+        if (gen !== this.lookGen || this.destroyed || !picture.bitmap) {
+          alt?.close();
+          return;
+        }
+        picture.alt?.close();
+        picture.alt = alt;
+        this.invalidate();
+      });
   }
 
   /** Fetches a sight's picture once, the first time it lights up; a failure is not asked again. */
@@ -1260,7 +1524,13 @@ export class MapEngine {
     const i = this.sightIndex.get(id);
     const sprite = i === undefined ? undefined : this.sights[i].sprite;
     if (!sprite || !this.fileUrl || this.pictures.has(id)) return;
-    const picture: SightPicture = { bitmap: null, readyAt: 0, usedAt: performance.now() };
+    const picture: SightPicture = {
+      bitmap: null,
+      alt: null,
+      altGen: 0,
+      readyAt: 0,
+      usedAt: performance.now(),
+    };
     this.pictures.set(id, picture);
     fetch(this.fileUrl(sprite.src))
       .then((res) => {
@@ -1292,7 +1562,8 @@ export class MapEngine {
       usedAt: p.usedAt,
     }));
     for (const id of picturesToDrop(list, lit?.id ?? null, PICTURE_BUDGET)) {
-      this.pictures.get(id)?.bitmap?.close();
+      const picture = this.pictures.get(id);
+      if (picture) dropPicture(picture);
       this.pictures.delete(id);
     }
   }
