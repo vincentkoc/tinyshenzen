@@ -126,8 +126,7 @@ export function MapApp() {
           marks,
           manifest,
           tileUrl: (z, tx, ty) => {
-            const restyleOn = prefsStore.getSnapshot().restyle;
-            const dir = restyleOn && manifest.restyle?.dir ? manifest.restyle.dir : "tiles";
+            const dir = manifest.restyle?.dir ?? "tiles";
             return dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, manifest.build);
           },
           fileUrl: (path) => dataUrl(path, manifest.indexes),
@@ -256,20 +255,6 @@ export function MapApp() {
   // settings → engine
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
-  // the constructor already points at the current restyle setting; only swap when it changes
-  const restyleFor = useRef<MapEngine | null>(null);
-  useEffect(() => {
-    if (!engine || !session) return;
-    const dir =
-      prefs.restyle && session.manifest.restyle?.dir ? session.manifest.restyle.dir : "tiles";
-    if (restyleFor.current !== engine) {
-      restyleFor.current = engine;
-      return;
-    }
-    engine.setTileUrl((z, tx, ty) =>
-      dataUrl(`${dir}/${z}/${tx}_${ty}.webp`, session.manifest.build),
-    );
-  }, [engine, session, prefs.restyle]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
 
   // the view lives in the URL, so any spot can be shared
@@ -512,7 +497,6 @@ export function MapApp() {
                 onChange={setPrefs}
                 hoodLines={hasHoods}
                 hasLife={hasLife}
-                hasRestyle={Boolean(session.manifest.restyle)}
               />
             }
             className="sign-in fixed top-[calc(var(--edge-t)+3.9375rem)] right-(--edge-r) sm:top-(--edge-t)"
@@ -540,6 +524,7 @@ export function MapApp() {
         onOpenChange={setAboutOpen}
         attribution={session?.manifest.attribution ?? []}
         hoodLines={hasHoods}
+        hasRestyle={Boolean(session?.manifest.restyle)}
         onDonate={
           takesDonations
             ? () => {

@@ -29,7 +29,6 @@ export const en: Strings = {
     strength: "Strength",
     tiltStrengthLabel: "Miniature blur strength",
     life: "Life on the map",
-    restyle: "Pixel Singapore restyle",
     timeOfDay: "Time of day",
     themes: { system: "Auto", light: "Day", dark: "Dusk" },
     language: "Language",
@@ -52,6 +51,7 @@ export const en: Strings = {
     openSource: "Open source on GitHub",
     contact: "Contact",
     madeBy: "Made by Vincent Koc",
+    restyle: "The look is inspired by Pixel Singapore.",
   },
   home: {
     title: "tinyworlds · whole cities, pocket-sized",

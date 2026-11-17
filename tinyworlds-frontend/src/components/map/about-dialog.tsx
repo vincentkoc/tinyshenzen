@@ -40,6 +40,8 @@ interface AboutDialogProps {
   attribution: string[];
   /** the world has outlines to draw, so the B key does something */
   hoodLines: boolean;
+  /** the world is shown in its restyled tiles; credit the look in this sign */
+  hasRestyle?: boolean;
   /** absent when this build takes no donations */
   onDonate?: () => void;
   /** a GitHub Sponsors address, used when there is no checkout dialog to open */
@@ -90,6 +92,7 @@ export function AboutDialog({
   onOpenChange,
   attribution,
   hoodLines,
+  hasRestyle,
   onDonate,
   donateHref,
   onBecome,
@@ -126,6 +129,7 @@ export function AboutDialog({
             {copy.about.notes.map((note) => (
               <p key={note}>{note}</p>
             ))}
+            {hasRestyle && <p>{t.about.restyle}</p>}
           </div>
 
           <section>

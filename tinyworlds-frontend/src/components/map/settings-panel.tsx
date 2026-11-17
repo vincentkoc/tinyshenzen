@@ -49,17 +49,9 @@ interface SettingsPanelProps {
   hoodLines: boolean;
   /** the world has ferries or flights to draw (life.json is not empty) */
   hasLife: boolean;
-  /** the world has a restyled tile pyramid next to the procedural one */
-  hasRestyle?: boolean;
 }
 
-export function SettingsPanel({
-  prefs,
-  onChange,
-  hoodLines,
-  hasLife,
-  hasRestyle,
-}: SettingsPanelProps) {
+export function SettingsPanel({ prefs, onChange, hoodLines, hasLife }: SettingsPanelProps) {
   const strengthId = useId();
   const { t, copy } = useI18n();
   const keys: [string[], string][] = [
@@ -115,13 +107,6 @@ export function SettingsPanel({
       </Row>
       {hasLife && (
         <Row label={t.settings.life} checked={prefs.life} onChange={(life) => onChange({ life })} />
-      )}
-      {hasRestyle && (
-        <Row
-          label={t.settings.restyle}
-          checked={prefs.restyle}
-          onChange={(restyle) => onChange({ restyle })}
-        />
       )}
 
       <div className="flex items-center gap-2 px-3.5 pt-2 pb-2.5">

@@ -29,7 +29,6 @@ export const zhCN: Strings = {
     strength: "强度",
     tiltStrengthLabel: "微缩模糊强度",
     life: "地图上的动态",
-    restyle: "像素新加坡画风",
     timeOfDay: "时段",
     themes: { system: "自动", light: "白天", dark: "黄昏" },
     language: "语言",
@@ -52,6 +51,7 @@ export const zhCN: Strings = {
     openSource: "在 GitHub 上开源",
     contact: "联系",
     madeBy: "由 Vincent Koc 制作",
+    restyle: "画风受 Pixel Singapore 启发。",
   },
   home: {
     title: "tinyworlds · 把整座城市装进口袋",

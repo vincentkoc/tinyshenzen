@@ -29,7 +29,6 @@ export const ptBR: Strings = {
     strength: "Intensidade",
     tiltStrengthLabel: "Intensidade do desfoque de miniatura",
     life: "Vida no mapa",
-    restyle: "Estilo Pixel Singapore",
     timeOfDay: "Hora do dia",
     themes: { system: "Auto", light: "Dia", dark: "Noite" },
     language: "Idioma",
@@ -53,6 +52,7 @@ export const ptBR: Strings = {
     openSource: "Código aberto no GitHub",
     contact: "Contato",
     madeBy: "Feito por Vincent Koc",
+    restyle: "O visual é inspirado em Pixel Singapore.",
   },
   home: {
     title: "tinyworlds · cidades inteiras, em miniatura",

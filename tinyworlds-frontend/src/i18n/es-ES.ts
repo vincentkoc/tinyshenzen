@@ -29,7 +29,6 @@ export const esES: Strings = {
     strength: "Intensidad",
     tiltStrengthLabel: "Intensidad del efecto maqueta",
     life: "Vida en el mapa",
-    restyle: "Estilo Pixel Singapore",
     timeOfDay: "Hora del día",
     themes: { system: "Auto", light: "Día", dark: "Noche" },
     language: "Idioma",
@@ -52,6 +51,7 @@ export const esES: Strings = {
     openSource: "Código abierto en GitHub",
     contact: "Contacto",
     madeBy: "Hecho por Vincent Koc",
+    restyle: "El estilo está inspirado en Pixel Singapore.",
   },
   home: {
     title: "tinyworlds · ciudades enteras, en miniatura",

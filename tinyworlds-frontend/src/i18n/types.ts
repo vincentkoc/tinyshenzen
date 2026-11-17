@@ -59,8 +59,6 @@ export interface Strings {
     strength: string;
     tiltStrengthLabel: string;
     life: string;
-    /** switch between the procedural tiles and a restyled set, when the world has one */
-    restyle: string;
     timeOfDay: string;
     themes: { system: string; light: string; dark: string };
     language: string;
@@ -89,6 +87,8 @@ export interface Strings {
     contact: string;
     /** the author credit, as a link: "Made by Vincent Koc" */
     madeBy: string;
+    /** credit for the restyled look, shown when the world has one */
+    restyle: string;
   };
   /** The front page that lists the worlds. `title` and `description` are the page's metadata. */
   home: {
