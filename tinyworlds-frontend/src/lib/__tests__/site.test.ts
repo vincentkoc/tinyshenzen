@@ -43,7 +43,7 @@ describe("site", () => {
   });
 
   it("points at the author's page and GitHub Sponsors", () => {
-    expect(AUTHOR_URL).toBe("https://github.com/vincentkoc");
+    expect(AUTHOR_URL).toBe("https://vincent.build");
     expect(SPONSOR_URL).toBe("https://github.com/sponsors/vincentkoc");
   });
 

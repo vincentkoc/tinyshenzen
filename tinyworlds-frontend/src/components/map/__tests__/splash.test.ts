@@ -11,6 +11,6 @@ describe("Splash", () => {
     expect(source).toContain("<Heart");
     expect(source).toContain("fill-taxi text-taxi");
     expect(source).toMatch(/absolute[\s\S]*bottom-\(--edge-b\)/);
-    expect(AUTHOR_URL).toBe("https://github.com/vincentkoc");
+    expect(AUTHOR_URL).toBe("https://vincent.build");
   });
 });
