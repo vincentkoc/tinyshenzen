@@ -6,8 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useI18n } from "@/hooks/use-i18n";
 import { LOCALE_NAMES, LOCALES, type LocalePref } from "@/i18n";
-import { NIGHT_PREFS, type NightPref, type Prefs, type ThemePref } from "@/lib/prefs";
-import { NIGHT_ENABLED } from "@/map/night-mode";
+import type { Prefs, ThemePref } from "@/lib/prefs";
 
 interface RowProps {
   label: string;
@@ -133,34 +132,6 @@ export function SettingsPanel({ prefs, onChange, hoodLines, hasLife }: SettingsP
           ))}
         </ToggleGroup>
       </div>
-
-      {NIGHT_ENABLED && (
-        <div className="flex items-center gap-2 px-3.5 pt-0.5 pb-2.5">
-          <span id={`${strengthId}-night`} className="flex-1 text-sm font-medium">
-            {t.settings.night}
-          </span>
-          <kbd aria-hidden className="kbd-key max-sm:hidden">
-            N
-          </kbd>
-          <ToggleGroup
-            type="single"
-            size="sm"
-            spacing={0}
-            aria-labelledby={`${strengthId}-night`}
-            value={prefs.night}
-            onValueChange={(night) => {
-              if (night) onChange({ night: night as NightPref });
-            }}
-            className="rounded-full bg-sign-raised p-0.5"
-          >
-            {NIGHT_PREFS.map((night) => (
-              <ToggleGroupItem key={night} value={night} className={PILL}>
-                {t.settings.nights[night]}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </div>
-      )}
 
       <div className="px-3.5 pt-1 pb-2.5">
         <span id={`${strengthId}-lang`} className="block pb-1.5 text-sm font-medium">

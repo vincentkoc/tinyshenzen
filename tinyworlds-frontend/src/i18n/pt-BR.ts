@@ -31,8 +31,6 @@ export const ptBR: Strings = {
     life: "Vida no mapa",
     timeOfDay: "Hora do dia",
     themes: { system: "Auto", light: "Dia", dark: "Noite" },
-    night: "Luzes da noite",
-    nights: { off: "Não", on: "Sim", auto: "Auto" },
     language: "Idioma",
     languageAuto: "Auto",
     keys: { search: "buscar", zoom: "zoom", wholeMap: "mapa inteiro", move: "mover" },
@@ -44,9 +42,8 @@ export const ptBR: Strings = {
     drag: "Arraste para mover. Para dar zoom, use a rolagem, o gesto de pinça ou dois cliques.",
     keysSearch: "{/} busca ruas, bairros e pontos turísticos. {0} mostra a cidade inteira.",
     keysToggles:
-      "{B} desenha {hoods}. {D} liga e desliga o desfoque de miniatura; {M}, o minimapa; {N}, as luzes da noite.",
-    keysTogglesNoHoods:
-      "{D} liga e desliga o desfoque de miniatura; {M}, o minimapa; {N}, as luzes da noite.",
+      "{B} desenha {hoods}. {D} liga e desliga o desfoque de miniatura; {M}, o minimapa.",
+    keysTogglesNoHoods: "{D} liga e desliga o desfoque de miniatura; {M}, o minimapa.",
     link: "O botão de link copia um endereço que abre o mapa exatamente onde você está.",
     mapData: "Dados do mapa",
     descriptions:

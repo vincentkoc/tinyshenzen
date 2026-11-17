@@ -180,11 +180,6 @@
 .dusk .tilt-on .map-tiles {
   filter: var(--dusk-tint) var(--tilt-lift);
 }
-/* night (the engine draws night versions of the tiles): the dusk wash steps aside */
-.night-on .dusk-wash,
-.dusk .night-on .dusk-wash {
-  opacity: 0;
-}
 /* over a building that lights up: it can be clicked (a drag still grabs) */
 .map-tiles.over-sight {
   cursor: pointer;

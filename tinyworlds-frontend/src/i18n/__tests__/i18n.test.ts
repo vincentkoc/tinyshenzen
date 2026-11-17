@@ -1,4 +1,3 @@
-import { NIGHT_ENABLED } from "@/map/night-mode";
 import { describe, expect, it } from "vitest";
 import { DICTIONARIES } from "..";
 
@@ -38,17 +37,6 @@ describe("dictionaries", () => {
     // a donor who gave under another address must not think the gift is lost
     for (const [locale, dictionary] of Object.entries(DICTIONARIES))
       expect(dictionary.me.noStonesBody, locale).toMatch(/e-?mail|correo|邮箱/i);
-  });
-
-  it("name the night lights and all three of their choices", () => {
-    for (const [locale, dictionary] of Object.entries(DICTIONARIES)) {
-      expect(dictionary.settings.night.trim(), locale).not.toBe("");
-      for (const choice of ["off", "on", "auto"] as const)
-        expect(dictionary.settings.nights[choice].trim(), `${locale} ${choice}`).not.toBe("");
-      // the help line names the N key only while the night lights are offered
-      if (NIGHT_ENABLED) expect(dictionary.about.keysToggles, locale).toContain("{N}");
-      else expect(dictionary.about.keysToggles, locale).not.toContain("{N}");
-    }
   });
 
   it("keep the same key caps in the help lines", () => {
