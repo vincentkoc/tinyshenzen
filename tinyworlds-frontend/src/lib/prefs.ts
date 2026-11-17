@@ -3,6 +3,9 @@ import { isLocale, type LocalePref } from "@/i18n/locale";
 import { SITE_ID } from "@/site";
 
 export type ThemePref = "system" | "light" | "dark";
+/** night lighting on the map: off, on, or following the visitor's clock */
+export type NightPref = "off" | "on" | "auto";
+export const NIGHT_PREFS: readonly NightPref[] = ["off", "on", "auto"];
 
 export interface Prefs {
   minimap: boolean;
@@ -18,6 +21,8 @@ export interface Prefs {
   lang: LocalePref;
   /** when the world has a restyled tile set, use it (the procedural tiles are the other choice) */
   restyle: boolean;
+  /** lit windows and streets over a darkened map */
+  night: NightPref;
 }
 
 /** One namespace per world (and one for the front page), so worlds on one origin keep their own settings. */
@@ -32,6 +37,7 @@ export const DEFAULT_PREFS: Prefs = {
   life: true,
   lang: "auto",
   restyle: true,
+  night: "off",
 };
 
 /** Keeps what is valid in a stored value and fills the rest with defaults. */
@@ -48,6 +54,7 @@ export function sanitizePrefs(value: unknown): Prefs {
     out.tiltStrength = Math.min(100, Math.max(0, Math.round(v.tiltStrength)));
   if (v.theme === "system" || v.theme === "light" || v.theme === "dark") out.theme = v.theme;
   if (v.lang === "auto" || isLocale(v.lang)) out.lang = v.lang;
+  if (NIGHT_PREFS.includes(v.night as NightPref)) out.night = v.night as NightPref;
   return out;
 }
 
