@@ -259,26 +259,29 @@ void main() {
 
   // ---- water: a dark mirror. The lights above it come back as streaks broken by ripples,
   // over a sky that deepens towards the top of the view, with slow moonlit bands and glints.
-  vec3 mirror = vec3(0.0);
-  for (int i = 1; i <= 4; i++) {
-    float fi = float(i);
-    vec2 rip = vec2(
-      (noise(m * vec2(0.04, 0.5) + vec2(uTime * 0.3, fi * 3.1)) - 0.5) * 0.006 * fi,
-      0.0
-    );
-    vec2 ruv = vUv + vec2(0.0, uReflect * fi) + rip;
-    float w = 1.1 - fi * 0.22;
-    mirror += (texture2D(uGlowNear, ruv).rgb * 2.2 + texture2D(uGlowFar, ruv).rgb * 1.6) * w;
+  // (skipped where there is no water: most of the screen, most of the time)
+  if (water > 0.004) {
+    vec3 mirror = vec3(0.0);
+    for (int i = 1; i <= 4; i++) {
+      float fi = float(i);
+      vec2 rip = vec2(
+        (noise(m * vec2(0.04, 0.5) + vec2(uTime * 0.3, fi * 3.1)) - 0.5) * 0.006 * fi,
+        0.0
+      );
+      vec2 ruv = vUv + vec2(0.0, uReflect * fi) + rip;
+      float w = 1.1 - fi * 0.22;
+      mirror += (texture2D(uGlowNear, ruv).rgb * 2.2 + texture2D(uGlowFar, ruv).rgb * 1.6) * w;
+    }
+    mirror *= cov * 0.55;
+    float depth = 1.0 - vUv.y;
+    vec3 sky = mix(vec3(0.016, 0.032, 0.075), vec3(0.04, 0.066, 0.13), depth) + c * vec3(0.04, 0.06, 0.1);
+    float band = smoothstep(0.55, 1.0, noise(m * vec2(0.012, 0.07) + vec2(uTime * 0.04, uTime * 0.015)));
+    float glint = step(0.992, hash12(floor(m / 2.0) + floor(uTime * 2.5) * 7.0))
+      * smoothstep(0.3, 0.8, band + 0.3);
+    vec3 waterNight = sky + mirror * vec3(1.0, 0.8, 0.58)
+      + vec3(0.32, 0.42, 0.62) * (band * 0.12 + glint * 0.5) * cov;
+    night = mix(night, waterNight, water);
   }
-  mirror *= cov * 0.55;
-  float depth = 1.0 - vUv.y;
-  vec3 sky = mix(vec3(0.016, 0.032, 0.075), vec3(0.04, 0.066, 0.13), depth) + c * vec3(0.04, 0.06, 0.1);
-  float band = smoothstep(0.55, 1.0, noise(m * vec2(0.012, 0.07) + vec2(uTime * 0.04, uTime * 0.015)));
-  float glint = step(0.992, hash12(floor(m / 2.0) + floor(uTime * 2.5) * 7.0))
-    * smoothstep(0.3, 0.8, band + 0.3);
-  vec3 waterNight = sky + mirror * vec3(1.0, 0.8, 0.58)
-    + vec3(0.32, 0.42, 0.62) * (band * 0.12 + glint * 0.5) * cov;
-  night = mix(night, waterNight, water);
 
   // ---- film: a soft shoulder for the brightest lights, a vignette, a grain too fine to see
   night = night / (1.0 + max(vec3(0.0), night - 0.75));
