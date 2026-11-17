@@ -31,6 +31,8 @@ export const en: Strings = {
     life: "Life on the map",
     timeOfDay: "Time of day",
     themes: { system: "Auto", light: "Day", dark: "Dusk" },
+    night: "Night lights",
+    nights: { off: "Off", on: "On", auto: "Auto" },
     language: "Language",
     languageAuto: "Auto",
     keys: { search: "search", zoom: "zoom", wholeMap: "whole map", move: "move" },
@@ -41,8 +43,9 @@ export const en: Strings = {
     yourCities: "Your cities",
     drag: "Drag to move. Scroll, pinch or double-click to zoom.",
     keysSearch: "{/} searches streets, neighbourhoods and landmarks. {0} shows the whole city.",
-    keysToggles: "{B} draws {hoods}, {D} switches the miniature blur, {M} the minimap.",
-    keysTogglesNoHoods: "{D} switches the miniature blur, {M} the minimap.",
+    keysToggles:
+      "{B} draws {hoods}, {D} switches the miniature blur, {M} the minimap, {N} the night lights.",
+    keysTogglesNoHoods: "{D} switches the miniature blur, {M} the minimap, {N} the night lights.",
     link: "The link button copies a link to exactly what you are looking at.",
     mapData: "Map data",
     descriptions:

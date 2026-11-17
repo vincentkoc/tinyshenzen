@@ -39,6 +39,15 @@ describe("dictionaries", () => {
       expect(dictionary.me.noStonesBody, locale).toMatch(/e-?mail|correo|邮箱/i);
   });
 
+  it("name the night lights and all three of their choices", () => {
+    for (const [locale, dictionary] of Object.entries(DICTIONARIES)) {
+      expect(dictionary.settings.night.trim(), locale).not.toBe("");
+      for (const choice of ["off", "on", "auto"] as const)
+        expect(dictionary.settings.nights[choice].trim(), `${locale} ${choice}`).not.toBe("");
+      expect(dictionary.about.keysToggles, locale).toContain("{N}");
+    }
+  });
+
   it("keep the same key caps in the help lines", () => {
     for (const [locale, dictionary] of Object.entries(DICTIONARIES)) {
       for (const key of ["keysSearch", "keysToggles", "keysTogglesNoHoods"] as const) {

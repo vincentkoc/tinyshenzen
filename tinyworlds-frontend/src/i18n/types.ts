@@ -61,6 +61,9 @@ export interface Strings {
     life: string;
     timeOfDay: string;
     themes: { system: string; light: string; dark: string };
+    /** lit windows and streets on a darkened map, and its three choices */
+    night: string;
+    nights: { off: string; on: string; auto: string };
     language: string;
     /** the choice that follows the browser's language */
     languageAuto: string;
