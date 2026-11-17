@@ -6,7 +6,7 @@ import type { NightPref } from "@/lib/prefs";
  */
 
 /** Whether the night lights are offered at all (the setting, the N key). Off: always day. */
-export const NIGHT_ENABLED = false;
+export const NIGHT_ENABLED = true;
 
 /** How long day turns to night (or back), ms. */
 export const NIGHT_FADE_MS = 1600;
