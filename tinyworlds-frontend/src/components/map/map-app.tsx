@@ -35,7 +35,7 @@ import type { Sight, SightTexts } from "@/map/sights";
 import type { Locale } from "@/i18n/locale";
 import { createLife } from "@/map/life";
 import { MapEngine } from "@/map/engine";
-import { toggledNight } from "@/map/night-mode";
+import { NIGHT_ENABLED, toggledNight } from "@/map/night-mode";
 import { formatHash, parseHash, writeHash } from "@/map/hash";
 import type { Manifest, Place } from "@/map/manifest";
 import { createSearchIndex, displayName } from "@/map/search";
@@ -259,7 +259,13 @@ export function MapApp() {
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
-  const night = useNight(engine, prefs.night, canvasRef, nightRef, reducedMotion);
+  const night = useNight(
+    engine,
+    NIGHT_ENABLED ? prefs.night : "off",
+    canvasRef,
+    nightRef,
+    reducedMotion,
+  );
 
   // the view lives in the URL, so any spot can be shared
   useEffect(() => {
@@ -385,6 +391,7 @@ export function MapApp() {
           break;
         case "n":
         case "N":
+          if (!NIGHT_ENABLED) return;
           prefsStore.set({ night: toggledNight(prefsStore.getSnapshot().night) });
           break;
         case "Escape":

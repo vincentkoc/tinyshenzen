@@ -1,3 +1,4 @@
+import { NIGHT_ENABLED } from "@/map/night-mode";
 import { describe, expect, it } from "vitest";
 import { DICTIONARIES } from "..";
 
@@ -44,7 +45,9 @@ describe("dictionaries", () => {
       expect(dictionary.settings.night.trim(), locale).not.toBe("");
       for (const choice of ["off", "on", "auto"] as const)
         expect(dictionary.settings.nights[choice].trim(), `${locale} ${choice}`).not.toBe("");
-      expect(dictionary.about.keysToggles, locale).toContain("{N}");
+      // the help line names the N key only while the night lights are offered
+      if (NIGHT_ENABLED) expect(dictionary.about.keysToggles, locale).toContain("{N}");
+      else expect(dictionary.about.keysToggles, locale).not.toContain("{N}");
     }
   });
 

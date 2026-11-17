@@ -5,6 +5,9 @@ import type { NightPref } from "@/lib/prefs";
  * (night.ts) so this stays in the first load and the renderer only loads when it is wanted.
  */
 
+/** Whether the night lights are offered at all (the setting, the N key). Off: always day. */
+export const NIGHT_ENABLED = false;
+
 /** How long day turns to night (or back), ms. */
 export const NIGHT_FADE_MS = 1600;
 

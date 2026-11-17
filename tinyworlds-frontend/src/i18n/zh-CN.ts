@@ -43,8 +43,8 @@ export const zhCN: Strings = {
     yourCities: "你的城市",
     drag: "拖动以移动。滚动、双指缩放或双击即可缩放。",
     keysSearch: "{/} 搜索街道、街区和地标。{0} 显示整座城市。",
-    keysToggles: "{B} 显示{hoods}，{D} 开关微缩模糊，{M} 开关小地图，{N} 开关夜景灯光。",
-    keysTogglesNoHoods: "{D} 开关微缩模糊，{M} 开关小地图，{N} 开关夜景灯光。",
+    keysToggles: "{B} 显示{hoods}，{D} 开关微缩模糊，{M} 开关小地图。",
+    keysTogglesNoHoods: "{D} 开关微缩模糊，{M} 开关小地图。",
     link: "链接按钮会复制一个链接，打开的正是你眼前的这一幕。",
     mapData: "地图数据",
     descriptions:

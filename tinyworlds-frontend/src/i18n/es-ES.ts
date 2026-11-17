@@ -43,10 +43,8 @@ export const esES: Strings = {
     yourCities: "Tus ciudades",
     drag: "Arrastra para moverte. Para hacer zoom, usa la rueda, pellizca o haz doble clic.",
     keysSearch: "{/} busca calles, barrios y lugares de interés. {0} muestra toda la ciudad.",
-    keysToggles:
-      "{B} dibuja {hoods}. {D} activa o desactiva el efecto maqueta; {M}, el minimapa; {N}, las luces de noche.",
-    keysTogglesNoHoods:
-      "{D} activa o desactiva el efecto maqueta; {M}, el minimapa; {N}, las luces de noche.",
+    keysToggles: "{B} dibuja {hoods}. {D} activa o desactiva el efecto maqueta; {M}, el minimapa.",
+    keysTogglesNoHoods: "{D} activa o desactiva el efecto maqueta; {M}, el minimapa.",
     link: "El botón del enlace copia una dirección que abre el mapa justo donde estás.",
     mapData: "Datos del mapa",
     descriptions:
