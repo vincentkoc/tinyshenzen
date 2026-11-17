@@ -125,6 +125,14 @@ python3 lora/slice_frontend.py "${CORE[@]}" --polish-coverage /tmp/coverage.geoj
 The last step needs the coverage outline from the pipeline first:
 `(cd tinyworlds-pipeline && npm run cli -- --city tinysz-core coverage --out /tmp/coverage.geojson)`.
 
+With the same outline, refresh the viewer's cover mask (the night lights stay inside it):
+
+```bash
+(cd lora && python3 cover_mask.py --outline /tmp/coverage.geojson \
+  --manifest ../tinyworlds-frontend/public/data/tinysz-core/manifest.json \
+  --out ../tinyworlds-frontend/src/worlds/tinysz-core.cover.ts)
+```
+
 Then build the compressed web pyramid the live site serves (free, idempotent,
 needs libwebp's `cwebp` on `PATH` or in `CWEBP`):
 
