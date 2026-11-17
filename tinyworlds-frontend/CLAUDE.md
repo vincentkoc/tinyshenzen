@@ -131,8 +131,6 @@ src/
 │   ├── search.ts search-rules.ts   # matching; per-language abbreviations and number forms
 │   ├── engine.ts        # MapEngine
 │   ├── life.ts          # ferries and flights
-│   ├── night.ts night-shaders.ts   # night lighting (WebGL), loaded only when turned on
-│   ├── night-mode.ts cover.ts      # when it is night and the fade; the mask lights stay inside
 │   ├── sights.ts sight-state.ts   # the buildings that light up, and which one is lit or pinned
 │   ├── quiz.ts          # Guess the building's questions (quiz.<locale>.json): parseQuiz
 │   └── __tests__/
@@ -778,30 +776,6 @@ no depth information: no cars.
 
 Layers are called every frame while life is on; with `prefers-reduced-motion` they are called
 once per redraw with `timeMs = 0`. The live engine is also on `window.tinyworld` for the console.
-
-### Night lights (`map/night*.ts`, `map/cover.ts`, `hooks/use-night.ts`)
-
-A setting (`prefs.night`: `"off"` by default, `"on"`, or `"auto"`, which follows the visitor's
-clock with a ramp at dusk and dawn; the N key switches it on and off) turns the map to night.
-Nothing of it is downloaded until it is first wanted: `use-night.ts` imports `map/night.ts` (and
-the world's `cover` mask, if any) on demand, about 8 KB gzipped.
-
-- `NightLayer` draws to a third canvas (`.map-night`) just above the tiles canvas. On every
-  `engine.on("draw")` it copies the tiles canvas into a texture and runs four WebGL 1 passes: a
-  quarter-size pass that finds what gives off light, two blurs (a near and a far glow), and the
-  picture. While it shows, `.night-on` hides the tiles canvas (it still draws, as the source, and
-  still takes the pointer) and the dusk wash. Output is capped at 2 px per CSS px.
-- The lights come from the painted tiles alone (`night-shaders.ts`): each pixel is sorted by
-  colour and local texture into water, leaves, asphalt, road paint and walls. Darker cells in a
-  textured wall are windows, lit by a stable hash per 3 map px cell (so they stay put while
-  panning and come on one by one as night falls); asphalt gets sodium lamp pools; water becomes a
-  rippled mirror of the glow above it with a slow sheen; everything else takes a blue-hour grade
-  lit by the blurred glow of its neighbours. Zoomed out, windows become a fine sparkle.
-- Nothing is lit outside the coverage mask: the finest level's tiles, and for a world with a
-  `cover` mask (written by `lora/cover_mask.py`), the cells of the edge tiles that lie inside its
-  coverage outline. Re-run the script when the outline or the tile set changes.
-- The fade takes 1.6 s (none with reduced motion); with reduced motion the lights also stand
-  still. No WebGL: `.night-flat`, a plain CSS tint.
 
 ### The building spotlight (`map/sights.ts`, `map/sight-state.ts`, `components/map/sight-sign.tsx`)
 
