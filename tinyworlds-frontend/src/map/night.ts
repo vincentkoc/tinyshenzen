@@ -1,4 +1,6 @@
-import { coverageMask, featherMask } from "./edge-fog";
+import type { CoverMask } from "@/worlds/types";
+import { coverCells } from "./cover";
+import { featherMask } from "./edge-fog";
 import type { MapEngine, ViewState } from "./engine";
 import { easeNight, stepNight } from "./night-mode";
 import { BLUR_FRAG, EMIT_FRAG, FINAL_FRAG, VERT } from "./night-shaders";
@@ -15,7 +17,7 @@ import { BLUR_FRAG, EMIT_FRAG, FINAL_FRAG, VERT } from "./night-shaders";
 
 /** The output is never denser than this many px per CSS px: the glow is soft anyway. */
 const MAX_DPR = 2;
-/** Coverage texture: px per finest-level tile side, and its feather. */
+/** Coverage texture: px per finest-level tile side (the cover mask's cells, or this), and its feather. */
 const COV_SUB = 4;
 const COV_FEATHER = 1;
 /** How far up (map px) each of the water's four reflection taps looks for lights. */
@@ -28,6 +30,8 @@ export interface NightLayerOptions {
   /** the canvas the night picture goes to */
   target: HTMLCanvasElement;
   reducedMotion?: boolean;
+  /** which parts of the edge tiles are inside the coverage outline; none: every tile in full */
+  cover?: CoverMask | null;
   /** told whenever the output starts or stops covering the tiles */
   onShow?: (showing: boolean) => void;
 }
@@ -49,6 +53,7 @@ export class NightLayer {
   private readonly source: HTMLCanvasElement;
   private readonly target: HTMLCanvasElement;
   private readonly onShow?: (showing: boolean) => void;
+  private readonly cover: CoverMask | null;
   private gl: WebGLRenderingContext;
   private reducedMotion: boolean;
 
@@ -103,6 +108,7 @@ export class NightLayer {
     this.source = options.source;
     this.target = options.target;
     this.onShow = options.onShow;
+    this.cover = options.cover ?? null;
     this.reducedMotion = options.reducedMotion ?? false;
     this.gl = gl;
     const b = this.engine.manifest.bounds;
@@ -282,8 +288,9 @@ export class NightLayer {
       return;
     }
     const pad = COV_FEATHER * 3 + 1;
-    const { data, width, height } = coverageMask(grid.cols, grid.rows, grid.has, COV_SUB, pad);
-    // featherMask pulls the ramp inside the tiles: lights fade out before the edge, never past it
+    const sub = this.cover?.cells ?? COV_SUB;
+    const { data, width, height } = coverCells(grid, this.cover, sub, pad);
+    // featherMask pulls the ramp inside: lights fade out before the outline, never past it
     const empty = featherMask(data, width, height, COV_FEATHER);
     const bytes = new Uint8Array(width * height);
     for (let i = 0; i < bytes.length; i++) bytes[i] = Math.round((1 - empty[i]) * 255);
@@ -300,7 +307,7 @@ export class NightLayer {
       gl.UNSIGNED_BYTE,
       bytes,
     );
-    const cell = grid.span / COV_SUB;
+    const cell = grid.span / sub;
     this.covRect = {
       x: grid.originX - pad * cell - this.anchor.x,
       y: grid.originY - pad * cell - this.anchor.y,

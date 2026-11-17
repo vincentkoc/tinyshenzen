@@ -5,6 +5,7 @@ import type { NightPref } from "@/lib/prefs";
 import type { MapEngine } from "@/map/engine";
 import type { NightLayer } from "@/map/night";
 import { nightTarget } from "@/map/night-mode";
+import { WORLD } from "@/worlds";
 
 /** How often "auto" looks at the clock again, ms. */
 const CLOCK_MS = 60_000;
@@ -49,13 +50,15 @@ export function useNight(
     const out = target.current;
     if (!src || !out) return;
     let cancelled = false;
-    import("@/map/night")
-      .then(({ NightLayer }) => {
+    // the renderer and the world's cover mask arrive together; a mask that fails lights every tile
+    Promise.all([import("@/map/night"), WORLD.cover?.().catch(() => null) ?? null])
+      .then(([{ NightLayer }, cover]) => {
         if (cancelled) return;
         const made = NightLayer.create({
           engine,
           source: src,
           target: out,
+          cover,
           reducedMotion,
           onShow: setShowing,
         });

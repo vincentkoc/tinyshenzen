@@ -69,6 +69,12 @@ export interface World {
    * front page lists it apart from the real cities.
    */
   fictional?: boolean;
+  /**
+   * Which parts of the edge tiles lie inside the map's coverage outline (written by
+   * lora/cover_mask.py), for the night layer: nothing is lit outside it. Loaded with that layer.
+   * Without it the night layer lights every tile in full.
+   */
+  cover?: () => Promise<CoverMask>;
   /** Decimals of the degrees in the corner readout. Defaults to 4. */
   readoutDigits?: number;
   /**
@@ -83,4 +89,13 @@ export interface World {
   quiz?: boolean;
   /** How queries are read. This follows the language of the map's names, not the interface's. */
   search: SearchRules;
+}
+
+/**
+ * Edge tiles split into cells × cells cells: "tx_ty" (finest level) → base64 bits, row-major,
+ * least significant bit first, 1 = inside. Tiles not listed are whole.
+ */
+export interface CoverMask {
+  cells: number;
+  tiles: Record<string, string>;
 }
