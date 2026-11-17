@@ -6,6 +6,7 @@ import { DonateDialog } from "@/components/donate/donate-dialog";
 import { ExploreBanner } from "@/components/map/explore-banner";
 import { useI18n } from "@/hooks/use-i18n";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { useNight } from "@/hooks/use-night";
 import { useQuiz } from "@/hooks/use-quiz";
 import { usePrefs } from "@/hooks/use-prefs";
 import {
@@ -34,6 +35,7 @@ import type { Sight, SightTexts } from "@/map/sights";
 import type { Locale } from "@/i18n/locale";
 import { createLife } from "@/map/life";
 import { MapEngine } from "@/map/engine";
+import { toggledNight } from "@/map/night-mode";
 import { formatHash, parseHash, writeHash } from "@/map/hash";
 import type { Manifest, Place } from "@/map/manifest";
 import { createSearchIndex, displayName } from "@/map/search";
@@ -68,6 +70,7 @@ const PAN_STEP = 160; // CSS px per arrow key press
 export function MapApp() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const marksRef = useRef<HTMLCanvasElement>(null);
+  const nightRef = useRef<HTMLCanvasElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const [attempt, setAttempt] = useState(0);
@@ -256,6 +259,7 @@ export function MapApp() {
   useEffect(() => engine?.setHoodLines(prefs.hoods), [engine, prefs.hoods]);
   useEffect(() => engine?.setLife(prefs.life), [engine, prefs.life]);
   useEffect(() => engine?.setReducedMotion(reducedMotion), [engine, reducedMotion]);
+  const night = useNight(engine, prefs.night, canvasRef, nightRef, reducedMotion);
 
   // the view lives in the URL, so any spot can be shared
   useEffect(() => {
@@ -379,6 +383,10 @@ export function MapApp() {
         case "M":
           toggle("minimap");
           break;
+        case "n":
+        case "N":
+          prefsStore.set({ night: toggledNight(prefsStore.getSnapshot().night) });
+          break;
         case "Escape":
           setQuery("");
           engine.setPin(null);
@@ -402,8 +410,17 @@ export function MapApp() {
     ({ "--sign-delay": `${ms}ms`, "--sign-from": `${from}px` }) as CSSProperties;
 
   return (
-    <div className={cn("map-root", tiltOn && "tilt-on")} style={rootStyle}>
+    <div
+      className={cn(
+        "map-root",
+        tiltOn && "tilt-on",
+        night.showing && "night-on",
+        night.flat && "night-flat",
+      )}
+      style={rootStyle}
+    >
       <canvas ref={canvasRef} className="map-tiles" tabIndex={0} aria-label={copy.mapLabel} />
+      <canvas ref={nightRef} aria-hidden className="map-night" />
       <div aria-hidden className="dusk-wash" />
       <div aria-hidden className="tilt-band" data-edge="top" data-depth="near" />
       <div aria-hidden className="tilt-band" data-edge="top" data-depth="far" />

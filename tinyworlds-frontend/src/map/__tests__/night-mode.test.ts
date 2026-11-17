@@ -6,6 +6,7 @@ import {
   nightNeeded,
   nightTarget,
   stepNight,
+  toggledNight,
 } from "../night-mode";
 
 const at = (h: number, m = 0) => new Date(2026, 10, 17, h, m, 0);
@@ -83,5 +84,13 @@ describe("nightNeeded", () => {
     expect(nightNeeded("on", 0, at(12))).toBe(true);
     expect(nightNeeded("auto", 0, at(22))).toBe(true);
     expect(nightNeeded("off", 0.3, at(12))).toBe(true);
+  });
+});
+
+describe("toggledNight", () => {
+  it("turns night on from off or auto, and off from on", () => {
+    expect(toggledNight("off")).toBe("on");
+    expect(toggledNight("auto")).toBe("on");
+    expect(toggledNight("on")).toBe("off");
   });
 });

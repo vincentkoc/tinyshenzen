@@ -171,14 +171,45 @@
   outline: none;
 }
 /* no filter at all unless one is wanted: an identity filter still costs a pass per frame */
-.dusk .map-tiles {
+.dusk .map-tiles,
+.dusk .map-night {
   filter: var(--dusk-tint);
 }
-.tilt-on .map-tiles {
+.tilt-on .map-tiles,
+.tilt-on .map-night {
   filter: var(--tilt-lift);
 }
-.dusk .tilt-on .map-tiles {
+.dusk .tilt-on .map-tiles,
+.dusk .tilt-on .map-night {
   filter: var(--dusk-tint) var(--tilt-lift);
+}
+
+/* night: a WebGL picture of the tiles canvas, drawn just above it. While it shows, the tiles
+   canvas still draws (it is the source) and still takes the pointer, but is not painted. */
+.map-night {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  display: none;
+  pointer-events: none;
+}
+.night-on .map-night {
+  display: block;
+}
+.night-on .map-tiles {
+  opacity: 0;
+}
+.night-on .dusk-wash {
+  opacity: 0;
+}
+/* no WebGL: a plain darker, cooler map */
+.night-flat .map-tiles {
+  filter: brightness(0.5) saturate(0.7) contrast(1.08);
+}
+.night-flat .dusk-wash {
+  opacity: 0.55;
 }
 /* over a building that lights up: it can be clicked (a drag still grabs) */
 .map-tiles.over-sight {

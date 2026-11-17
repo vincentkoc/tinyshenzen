@@ -52,6 +52,11 @@ export function stepNight(
 /** The fade as drawn: eased, so the change starts and lands softly. */
 export const easeNight = smooth;
 
+/** The N key: night on from off or auto, off from on. */
+export function toggledNight(pref: NightPref): NightPref {
+  return pref === "on" ? "off" : "on";
+}
+
 /** Whether the renderer is needed at all: night is on, coming, or still fading out. */
 export function nightNeeded(pref: NightPref, mix: number, date: Date = new Date()): boolean {
   return mix > 0 || nightTarget(pref, date) > 0;
